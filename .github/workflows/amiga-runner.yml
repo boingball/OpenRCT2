@@ -1,0 +1,35 @@
+name: Amiga 68060 graphics runner
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'amiga/prototype/**'
+      - '.github/workflows/amiga-runner.yml'
+  pull_request:
+    paths:
+      - 'amiga/prototype/**'
+      - '.github/workflows/amiga-runner.yml'
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: amiga/prototype
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install compiler and CPU emulator
+        run: sudo apt-get update && sudo apt-get install -y gcc-m68k-linux-gnu binutils-m68k-linux-gnu libc6-dev-m68k-cross qemu-user
+      - name: Host and sanitizer checks
+        run: make test test-asan
+      - name: Native HUNK build and 68060 checks
+        run: make amiga test-68k check-060
+      - name: Package runner
+        run: |
+          mkdir -p build/package/OpenRCT2Runner/Data
+          cp build/OpenRCT2Runner README.md NOTICE.md ../../licence.txt build/package/OpenRCT2Runner/
+          printf 'Copy your original RCT2 Data/g1.dat into this drawer.\n' > build/package/OpenRCT2Runner/Data/README.txt
+          printf 'Source commit: https://github.com/%s/tree/%s/amiga/prototype\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" > build/package/OpenRCT2Runner/SOURCE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenRCT2-Amiga-68060-graphics-runner
+          path: amiga/prototype/build/package/

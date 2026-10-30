@@ -1,0 +1,158 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+#include "runner.h"
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef __m68k__
+/* The cross libc's calloc uses a 68020 64-bit multiply which a bare 68060
+ * traps on. Keep test allocations out of that library routine; the Amiga
+ * executable uses AllocMem, not libc. */
+static uint8_t allocation_arena[2 * 1024 * 1024];
+static size_t allocation_used;
+static void *test_calloc(size_t n, size_t size) {
+    size_t bytes = n * size;
+    void *p;
+    assert(allocation_used + bytes <= sizeof(allocation_arena));
+    p = allocation_arena + allocation_used;
+    allocation_used += (bytes + 3) & ~(size_t)3;
+    memset(p, 0, bytes);
+    return p;
+}
+#define calloc test_calloc
+#define free(p) ((void)(p))
+#endif
+
+void *platform_alloc(uint32_t n) { return calloc(1,n); }
+void platform_free(void *p,uint32_t n) { (void)n; free(p); }
+void platform_log(const char *s) { (void)s; }
+int platform_load(const char *p,uint8_t **o,uint32_t *s) { (void)p; *o=NULL; *s=0; return 0; }
+int platform_open(const Options *o) { (void)o; return 0; }
+void platform_close(void) {}
+void platform_palette(const uint32_t p[256]) { (void)p; }
+int platform_input(void) { return KEY_QUIT; }
+void platform_wait(void) {}
+uint32_t platform_ticks(void) { return 0; }
+uint32_t platform_frequency(void) { return 1000000; }
+void platform_present(const Canvas *c,uint8_t *d) { (void)c; (void)d; }
+int platform_write_log(const char *s) { (void)s; return 0; }
+
+static void put16(uint8_t *p,unsigned n) { p[0]=(uint8_t)n; p[1]=(uint8_t)(n>>8); }
+static void put32(uint8_t *p,uint32_t n) { put16(p,n); put16(p+2,n>>16); }
+static uint32_t checksum(const void *p,size_t n) {
+    const uint8_t *b=p; uint32_t h=2166136261u;
+    while (n--) h=(h^*b++)*16777619u;
+    return h;
+}
+static void test_g1(void) {
+    uint8_t file[128]={0}, guarded[8*8+32], before[sizeof(guarded)];
+    G1 g; Sprite s; Canvas c={guarded+16,8,8,1,7};
+    int x,y,i;
+    put32(file,1); put32(file+4,24);
+    put16(file+12,4); put16(file+14,3); put16(file+16,(uint16_t)-1); put16(file+18,(uint16_t)-2); put16(file+20,4);
+    put16(file+24,6); put16(file+26,12); put16(file+28,17);
+    /* 3 rows: full run, middle run, two chunks. */
+    file[30]=0x84; file[31]=0; file[32]=10; file[33]=11; file[34]=12; file[35]=13;
+    file[36]=0x82; file[37]=1; file[38]=21; file[39]=22;
+    /* Offset deliberately allows unused padding. */
+    file[41]=1; file[42]=0; file[43]=30; file[44]=0x81; file[45]=3; file[46]=33;
+    assert(g1_open(&g,file,48)); assert(g1_sprite(&g,0,&s)); assert(s.x==-1 && s.y==-2 && s.width==4);
+    for (y=-4;y<12;y++) for (x=-4;x<12;x++) {
+        uint8_t expected[64]; memset(guarded,0xa5,sizeof(guarded)); memset(c.pixels,0,64); memset(expected,0,64);
+        for (i=0;i<12;i++) {
+            int px=i%4, py=i/4, dx=x-1+px, dy=y-2+py; uint8_t colour=0;
+            if (py==0) colour=(uint8_t)(10+px);
+            if (py==1 && (px==1 || px==2)) colour=(uint8_t)(20+px);
+            if (py==2 && (px==0 || px==3)) colour=(uint8_t)(30+px);
+            if (colour && dx>=0 && dx<8 && dy>=1 && dy<7) expected[dy*8+dx]=colour;
+        }
+        assert(g1_draw(&g,0,&c,x,y,0)); assert(!memcmp(c.pixels,expected,64));
+        for (i=0;i<16;i++) assert(guarded[i]==0xa5 && guarded[80+i]==0xa5);
+    }
+    memset(guarded,0x55,sizeof(guarded)); memcpy(before,guarded,sizeof(before));
+    file[44]=0x7f; /* invalid: run overflows image/data, no end-of-line */
+    assert(!g1_draw(&g,0,&c,2,3,0)); assert(!memcmp(before,guarded,sizeof(before)));
+    file[44]=0x81;
+    assert(!g1_open(&g,file,7)); assert(!g1_open(&g,file,47));
+    put32(file,0xffffffffu); assert(!g1_open(&g,file,48));
+    put32(file,1); put32(file+4,0xffffffffu); assert(!g1_open(&g,file,48));
+    /* Bitmap with transparent zero and primary remap. */
+    put32(file+4,12); put16(file+20,1); put16(file+16,0); put16(file+18,0);
+    memset(file+24,0,12); file[24]=243; file[25]=254; file[27]=4;
+    assert(g1_open(&g,file,36)); memset(c.pixels,19,64);
+    assert(g1_draw(&g,0,&c,1,1,22)); assert(c.pixels[9]==22 && c.pixels[10]==33 && c.pixels[11]==19 && c.pixels[12]==4);
+    put32(file+8,0xffffffffu); assert(!g1_sprite(&g,0,&s));
+}
+
+static void test_palette(void) {
+    uint8_t *file=calloc(1,8+1533*16+6); G1 g; uint32_t pal[256]; uint8_t *e=file+8+1532*16;
+    assert(file); put32(file,1533); put32(file+4,6);
+    put16(e+4,2); put16(e+8,10); put16(e+12,8);
+    file[8+1533*16]=1; file[8+1533*16+1]=2; file[8+1533*16+2]=3;
+    assert(g1_open(&g,file,8+1533*16+6)); g1_palette(&g,pal); assert(pal[10]==0x030201 && pal[11]==0);
+    put16(e+4,257); g1_palette(&g,pal); assert(pal[10]!=0x030201);
+    free(file);
+}
+static void test_options(void) {
+    Options o; const char *args="LOW G1=\"Work:Games/RCT 2/Data/g1.dat\" MODEID=0x50011000 BENCH";
+    options_init(&o); assert(options_parse(&o,args,(int)strlen(args)));
+    assert(o.width==320 && o.height==240 && o.bench && o.mode==0x50011000u && !strcmp(o.g1_path,"Work:Games/RCT 2/Data/g1.dat"));
+    assert(!options_parse(&o,"MODEID=0xGG",11)); assert(!options_parse(&o,"G1=\"broken",10));
+    assert(!options_parse(&o,"UNKNOWN",7)); assert(!options_parse(&o,"MODEID=123456789",16));
+    assert(!options_parse(&o,"G1=",3));
+}
+static void test_upstream_fixture(void) {
+    static uint8_t file[9000], pixels[128*128];
+    G1 g;
+    Canvas canvas={pixels,128,128,0,128};
+    FILE *f=fopen("../../test/tests/testdata/sprites/example.dat","rb");
+    size_t n;
+    assert(f); n=fread(file,1,sizeof(file),f); assert(!ferror(f)); assert(!fclose(f));
+    assert(g1_open(&g,file,(uint32_t)n));
+    assert(g1_draw(&g,0,&canvas,0,0,0));
+    /* Independent byte-by-byte decode of upstream's real 128x128 RLE fixture. */
+    assert(checksum(pixels,sizeof(pixels))==0x4e310b7au);
+}
+static uint32_t test_scene(int w,int h) {
+    static Runner incremental,reference;
+    size_t bytes=(size_t)w*h;
+    uint8_t *a=calloc(1,bytes), *b=calloc(1,bytes), *backa=calloc(1,bytes), *backb=calloc(1,bytes), *old=calloc(1,bytes);
+    unsigned frame; uint32_t hash;
+    assert(a&&b&&backa&&backb&&old);
+    runner_init(&incremental,a,backa,w,h); runner_init(&reference,b,backb,w,h);
+    for (frame=0;frame<140;frame++) {
+        int key=KEY_NONE; size_t i;
+        if (frame==10) key=KEY_MORE;
+        if (frame==20) key=KEY_RIGHT;
+        if (frame==30) key=KEY_DOWN;
+        if (frame==40) key=KEY_PAUSE;
+        if (frame==50) key=KEY_PAUSE;
+        if (frame==60) key=KEY_HOME;
+        if (frame==70) key=KEY_MORE;
+        if (frame==80) key=KEY_MORE;
+        if (frame==90) key=KEY_LESS;
+        if (frame==100) key=KEY_GRID;
+        if (frame==110 || frame==120) key=KEY_VIEW;
+        runner_input(&incremental,key); runner_input(&reference,key);
+        memcpy(old,a,bytes);
+        runner_step(&incremental,40000,1000000); runner_step(&reference,40000,1000000);
+        runner_render(&incremental); reference.full_redraw=1; runner_render(&reference);
+        assert(!memcmp(a,b,bytes));
+        /* Every changed pixel must be included in the regions copied to RTG. */
+        for (i=0;i<bytes;i++) if (a[i]!=old[i]) {
+            unsigned x=(unsigned)(i%(size_t)w), y=(unsigned)(i/(size_t)w);
+            assert(incremental.dirty[(y/TILE_H)*(unsigned)(w/TILE_W)+x/TILE_W]);
+        }
+        memset(incremental.dirty,0,sizeof(incremental.dirty));
+    }
+    hash=checksum(a,bytes);
+    free(a);free(b);free(backa);free(backb);free(old);return hash;
+}
+int main(void) {
+    uint32_t a,b;
+    test_g1(); test_palette(); test_options(); test_upstream_fixture();
+    a=test_scene(640,480); b=test_scene(320,240);
+    printf("G1 clipping/malformed files/palettes/options/dirty redraw: PASS\n640x480 %08lx 320x240 %08lx\n",(unsigned long)a,(unsigned long)b);
+    return 0;
+}
