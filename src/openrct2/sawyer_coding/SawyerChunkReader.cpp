@@ -46,7 +46,7 @@ namespace OpenRCT2::SawyerCoding
         try
         {
             auto header = _stream->ReadValue<ChunkHeader>();
-            header.length = ToLittleEndian(header.length);
+            // ReadValue already calls ChunkHeader::LittleEndianToHost.
             _stream->Seek(header.length, STREAM_SEEK_CURRENT);
         }
         catch (const std::exception&)
@@ -63,7 +63,7 @@ namespace OpenRCT2::SawyerCoding
         try
         {
             auto header = _stream->ReadValue<ChunkHeader>();
-            header.length = ToLittleEndian(header.length);
+            // ReadValue already calls ChunkHeader::LittleEndianToHost.
             if (header.length >= kMaxUncompressedChunkSize)
                 throw SawyerChunkException(kExceptionMessageCorruptChunkSize);
 

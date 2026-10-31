@@ -723,6 +723,13 @@ namespace OpenRCT2::RCT2
                 ReadChunk6(chunkReader, 488816);
             }
 
+            // Profile limits apply to host-order values. On Amiga a raw
+            // little-endian 150-tile map otherwise looks like 38400 tiles.
+            ByteSwapS6IfBigEndian();
+            AMIGA_TRACE(String::stdFormat("s6: host-order map %u x %u, profile limit %u",
+                static_cast<unsigned>(_s6.MapSize), static_cast<unsigned>(_s6.MapSize),
+                static_cast<unsigned>(MemoryProfile::kMapSize)).c_str());
+
             if constexpr (MemoryProfile::kSmall)
             {
                 if (!MemoryProfile::mapFits(_s6.MapSize, _s6.MapSize))
@@ -732,7 +739,6 @@ namespace OpenRCT2::RCT2
             _isScenario = isScenario;
             _s6Path = path;
 
-            ByteSwapS6IfBigEndian();
             return ParkLoadResult(GetRequiredObjects());
         }
 

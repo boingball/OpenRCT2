@@ -93,14 +93,17 @@ static T ByteSwapBE(const T& value)
     }
 }
 
-// Scalar wire conversion. Keep ByteSwapBE's unconditional byte-reversal
-// semantics for compatibility with existing callers.
+// Little-endian wire conversion must reverse bytes on a big-endian host.
+// ByteSwapBE converts to big-endian (an identity there), so do not call it.
 template<typename T>
 static T ToLittleEndian(T value)
 {
     static_assert(std::is_integral_v<T> || std::is_enum_v<T>);
     if constexpr (std::endian::native == std::endian::big)
-        return ByteSwapBE(value);
+    {
+        using Swap = ByteSwapT<sizeof(T)>;
+        return static_cast<T>(Swap::SwapBE(static_cast<typename Swap::UIntType>(value)));
+    }
     else
         return value;
 }

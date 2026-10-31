@@ -224,3 +224,39 @@ engine's ParseLongOption explicitly supports. This also retains paths with
 spaces. The 0.17a update changes only the launch script and requires the
 existing 0.17 executable. It does not establish successful G1 loading or
 gameplay until the corrected launch has been tested on WinUAE.
+
+### S6 profile validation and title background (0.18)
+
+WinUAE now indexes 57 scenarios and 204 tracks, but every attempted park and
+both title-sequence parks fail the small-memory map-size check. That check
+read the raw little-endian MapSize before ByteSwapS6IfBigEndian. Validation
+now runs after conversion and retains the 5..256 tile boundary.
+
+The native regression also exposed an integration conflict: ByteSwapBE now
+converts to big-endian and is therefore the identity on Amiga, while our
+ToLittleEndian helper still called it expecting unconditional reversal.
+ToLittleEndian now uses ByteSwapT directly on big-endian hosts. Fixed-byte
+tests cover 16/32/64-bit values, enums, reading and writing. The previous
+header fails the native fixed-byte test; the corrected header passes both
+native no-FPU and little-endian host runs. Round trips alone would not
+detect matching encoder/decoder errors.
+The integrated IStream already converts ReadValue/WriteValue values. Remove
+our redundant Sawyer chunk-length conversion after ReadValue and the track
+checksum conversion before WriteValue, so each is converted exactly once.
+
+The Amiga main window also clears each dirty title-background region before
+rendering its viewport. An unloaded title map does not otherwise paint every
+pixel, leaving old menus/tooltips in the framebuffer. This adds no forced
+full-screen invalidation and does not clear normal gameplay viewports.
+
+The S6 regression generates wire-order Sawyer streams for both the split
+SC6 tail and the SV6 whole tail, using the real importer and empty object
+slots. It tests sizes 0, 4, 5, 150, 256 and 257; optional file input tests
+decoding and required-object extraction without importing or simulating.
+All twelve generated-stream cases pass with `--cpu 68060 --no-fpu
+--dirty-heap --sanitize --ram 64M --stack 1M`, without FPSP emulation.
+The fixed track output/checksum bytes, software-float runtime regression and
+rebuilt GUI version/startup/shutdown also pass. A real saved-file fixture
+stops at a volamos continuation-stub error; it is not a successful load or
+a diagnosed game failure, and full native import/simulation remains open.
+Graphical confirmation and full-game memory validation remain separate.
