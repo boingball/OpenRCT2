@@ -1,12 +1,88 @@
-# OpenRCT2 Amiga core investigation — milestone 0.6
+# OpenRCT2 Amiga core investigation — milestone 0.7
 
 The 0.1 graphics runner has passed the user's WinUAE RTG test with original G1
 graphics. This milestone tackles the **actual engine**, starting with memory,
 a real simulation benchmark on the host, and native C++ runtime probes.
 
 **There is no native Amiga park simulation executable yet.** The downloadable
-0.6 executables below are diagnostics. The 0.1 graphics runner remains the
+0.7 executables below are diagnostics. The 0.1 graphics runner remains the
 working RTG test.
+
+## Partial native GameState import (0.7)
+
+Probe 0.6's runtime/shared-pointer checks and real TestPark.sv6 decoding have
+now passed the user's WinUAE tests. The next executable is OpenRCT2ImportProbe:
+
+```text
+OpenRCT2ImportProbe TestPark.sv6
+```
+
+The download includes TestPark.sv6. The tool constructs the actual small-profile
+GameState_t (9,722,842 bytes on m68k), imports terrain/path elements into its
+real tileElements vector, and builds the engine's TilePointerIndex. It copies
+selected metadata with explicit little-endian reads: map dimensions, date,
+ticks, RNG seeds, initial cash, loan, park flags, entrance fee, guest count,
+rating, decrypted cash and a separate legacy scenario label. It does not
+allocate the entire extended S6Data struct merely to read those fields.
+
+The terrain/path conversion helpers are shared with the normal S6Importer.
+Their data-only accessors are moved unchanged out of UI/object-heavy source
+files into small translation units so they can link on Amiga. Path status
+access also fixes an actual endian-dependent union: AdditionStatus aliases
+the low byte of RideId, which is not its first native byte on m68k. The new
+accessors preserve the little-endian semantics and the ID's upper byte.
+
+The resulting state is deliberately partial and isolated. Ride/entity/scenery
+and other elements are counted and omitted. The guest number is the saved
+counter, not a set of imported guest entities. Terrain slots retain stable
+legacy terrain indices; path slots use the engine's legacy-path form. No
+ObjectManager or object images are loaded. This state is never installed as
+the active game state and must not be ticked or passed off as a complete park.
+The main Platform.h endian gate remains intact.
+
+OpenRCT2ImportProbe.txt and a small P6 PPM overview, ImportedMap.ppm, are
+written in the current writable drawer. The image uses diagnostic terrain,
+water and footpath colours; it is not an OpenRCT2 viewport or ride rendering.
+The input SV6 is read only. Only classic SV6 saved games are accepted in this
+partial importer; SC6, modern .park and extended Classic files are rejected.
+The existing 0.6 save probe remains useful for chunk-level SC6 checks.
+
+Verified on the host and volamos 68060/no-FPU with 64 MiB RAM:
+
+| Save | Map | Active surfaces | Paths | Partial-state fingerprint |
+| --- | --- | ---: | ---: | --- |
+| TestPark (small car-ride fixture) | 15 x 15 | 225 | 24 | a741afd1 |
+| bpb.sv6 | 128 x 128 | 16,384 | 3,400 | 525d0b3d |
+
+Canonical imported-field fingerprints and overview bytes match across both
+architectures. An independent little-endian wire fixture checks metadata,
+RNG input, queue paths and fixed PPM bytes; another checks negative cash.
+Tests reject bad checksums, oversized maps, unterminated tile chains,
+unsupported scenarios and truncated input, and verify saves are not modified.
+Host ASan/UBSan checks pass (LeakSanitizer disabled under the sandbox).
+
+A rebuilt full host engine also passes the prior 1,000-tick busy-park and
+2,000-tick car-ride comparisons against the standard-profile baseline. This
+checks that the shared conversion/refactoring changes preserve the selected
+simulation fingerprints on the existing supported host. It does not establish
+that native Amiga simulation works. The 0.7 executable still needs WinUAE test.
+
+Building this diagnostic requires the official nlohmann JSON forward headers,
+used by the actual S6Data declaration, as well as the existing compiler:
+
+```sh
+# After installing nlohmann-json3-dev (Debian/Ubuntu):
+mkdir -p amiga/core/build/headers
+cp -R /usr/include/nlohmann amiga/core/build/headers/
+make -C amiga/core import-probes AMIGA_CXX=/path/to/m68k-amigaos-g++
+python3 amiga/core/verify_partial_import.py amiga/core/build/import-probe-host
+# Optional native comparison:
+python3 amiga/core/verify_partial_import.py amiga/core/build/import-probe-host \
+  --native amiga/core/build/OpenRCT2ImportProbe --emulator /path/to/volamos
+```
+
+JSON_INCLUDE can instead point to another include root containing
+nlohmann/json_fwd.hpp. The target uses headers only, with no JSON runtime.
 
 ## Native save decoding milestone (0.6)
 

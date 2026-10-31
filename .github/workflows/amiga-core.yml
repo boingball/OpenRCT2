@@ -15,6 +15,11 @@ on:
       - 'src/openrct2/core/Endianness.h'
       - 'src/openrct2/core/IStream.cpp'
       - 'src/openrct2/sawyer_coding/**'
+      - 'src/openrct2/rct12/**'
+      - 'src/openrct2/rct2/S6ElementImport.*'
+      - 'src/openrct2/world/tile_element/**'
+      - 'src/openrct2/world/Footpath.cpp'
+      - 'src/openrct2/drawing/Colour*.cpp'
       - '.github/workflows/amiga-core.yml'
 jobs:
   compare-profiles:
@@ -70,12 +75,19 @@ jobs:
             https://github.com/DalsinAI/openamigagcc/releases/download/v16.2.0-open4/openamigagcc-16.2.0-open4-x86_64-linux.tar.xz
           echo '495319a2ffd803278f8827cad70074029c7aa9ecbe05d037e8646ba43ab94ab2  /tmp/openamigagcc.tar.xz' | sha256sum -c -
           tar -xJf /tmp/openamigagcc.tar.xz -C /tmp
+      - name: Install forward headers for actual S6Data
+        run: |
+          sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev
+          mkdir -p amiga/core/build/headers
+          cp -R /usr/include/nlohmann amiga/core/build/headers/
       - name: Build native diagnostics and test host runtime
         run: |
-          make -C amiga/core native test \
+          make -C amiga/core native test import-probes \
             AMIGA_CXX=/tmp/openamigagcc-16.2.0-open4-x86_64-linux/bin/m68k-amigaos-g++
       - name: Verify save fixtures and corrupt inputs on host
         run: python3 amiga/core/verify_save_probe.py amiga/core/build/save-probe-host
+      - name: Check partial GameState imports and rejected files on host
+        run: python3 amiga/core/verify_partial_import.py amiga/core/build/import-probe-host
       - uses: actions/upload-artifact@v4
         with:
           name: Amiga-native-core-probes-open4
@@ -83,6 +95,9 @@ jobs:
             amiga/core/build/OpenRCT2CoreProbe
             amiga/core/build/OpenRCT2CoreProbe-Full
             amiga/core/build/OpenRCT2SaveProbe
+            amiga/core/build/OpenRCT2ImportProbe
+            build/import-verification/results.json
+            build/import-verification/host/**/run.log
             build/save-verification/*.log
             build/save-verification/results.json
             amiga/core/README.md

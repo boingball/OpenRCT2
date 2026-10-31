@@ -51,3 +51,25 @@ test: host-probes $(BUILD)/test-pthread-format $(BUILD)/save-probe-host
 clean:
 	rm -rf $(BUILD)
 -include $(wildcard $(BUILD)/native/*.d)
+
+# JSON forward headers are needed by the actual legacy S6Data declaration.
+# Point JSON_INCLUDE at an include root containing nlohmann/json_fwd.hpp.
+JSON_INCLUDE ?= $(BUILD)/headers
+IMPORT_SOURCES = $(filter-out save_probe.cpp,$(SAVE_SOURCES)) import_probe.cpp s6_partial_import.cpp \
+ $(ROOT)/src/openrct2/rct12/TileElementData.cpp \
+ $(ROOT)/src/openrct2/rct2/S6ElementImport.cpp \
+ $(ROOT)/src/openrct2/drawing/ColourData.cpp \
+ $(ROOT)/src/openrct2/world/tile_element/ElementData.cpp
+IMPORT_OBJECTS = $(addprefix $(BUILD)/import-native/,$(notdir $(IMPORT_SOURCES:.cpp=.o)))
+vpath %.cpp $(ROOT)/src/openrct2/drawing $(ROOT)/src/openrct2/rct12 $(ROOT)/src/openrct2/rct2 $(ROOT)/src/openrct2/world/tile_element
+$(BUILD)/import-native:
+	mkdir -p $@
+$(BUILD)/import-native/%.o: %.cpp | $(BUILD)/import-native
+	$(AMIGA_CXX) $(FLAGS) $(AMIGA_FLAGS) -DOPENRCT2_SMALL_MEMORY -I$(JSON_INCLUDE) -MMD -MP -c $< -o $@
+$(BUILD)/OpenRCT2ImportProbe: $(IMPORT_OBJECTS)
+	$(AMIGA_CXX) $(AMIGA_FLAGS) $^ -o $@ -lm -lpthread -latomic
+$(BUILD)/import-probe-host: $(IMPORT_SOURCES) diagnostic_output.h s6_partial_import.h | $(BUILD)
+	$(HOST_CXX) $(FLAGS) -DOPENRCT2_SMALL_MEMORY -I$(JSON_INCLUDE) $(IMPORT_SOURCES) -o $@
+.PHONY: import-probes
+import-probes: $(BUILD)/import-probe-host $(BUILD)/OpenRCT2ImportProbe
+-include $(wildcard $(BUILD)/import-native/*.d)

@@ -7,6 +7,7 @@
  * OpenRCT2 is licensed under the GNU General Public License version 3.
  *****************************************************************************/
 
+#include "S6ElementImport.h"
 #include "../Context.h"
 #include "../Diagnostic.h"
 #include "../Game.h"
@@ -1331,77 +1332,17 @@ namespace OpenRCT2::RCT2
         void ImportTileElement(TileElement* dst, const RCT12TileElement* src, bool invisible)
         {
             const auto rct12Type = src->getType();
-            dst->clearAs(ToOpenRCT2TileElementType(rct12Type));
-            dst->setDirection(src->getDirection());
-            dst->setBaseZ(src->baseHeight * kCoordsZStep);
-            dst->setClearanceZ(src->clearanceHeight * kCoordsZStep);
-
-            // All saved in "flags"
-            dst->setOccupiedQuadrants(src->getOccupiedQuadrants());
-            dst->setGhost(src->isGhost());
-            dst->setLastForTile(src->isLastForTile());
-            dst->setInvisible(invisible);
+            ImportS6TileBase(*dst, *src, invisible);
 
             switch (rct12Type)
             {
                 case RCT12TileElementType::surface:
-                {
-                    auto dst2 = dst->asSurface();
-                    auto src2 = src->asSurface();
-
-                    dst2->setSlope(src2->GetSlope());
-
-                    dst2->setSurfaceObjectIndex(_terrainSurfaceTypeToEntryMap[src2->GetSurfaceStyle()]);
-                    dst2->setEdgeObjectIndex(src2->GetEdgeStyle());
-
-                    dst2->setGrassLength(src2->GetGrassLength());
-                    dst2->setOwnership(src2->GetOwnership());
-                    dst2->setParkFences(src2->GetParkFences());
-                    dst2->setWaterHeight(src2->GetWaterHeight());
-                    dst2->setHasTrackThatNeedsWater(src2->HasTrackThatNeedsWater());
-                    dst2->setPrimarySurfaceColour(kTerrainSurfaceColours[src2->GetSurfaceStyle()]);
-                    dst2->setPrimaryEdgeColour(kTerrainEdgeColours[src2->GetEdgeStyle()]);
-
+                    ImportS6SurfaceData(*dst->asSurface(), *src->asSurface(), _terrainSurfaceTypeToEntryMap);
                     break;
-                }
                 case RCT12TileElementType::path:
-                {
-                    auto dst2 = dst->asPath();
-                    auto src2 = src->asPath();
-
-                    auto pathEntryIndex = src2->GetEntryIndex();
-                    auto surfaceEntry = src2->IsQueue() ? _pathToQueueSurfaceMap[pathEntryIndex]
-                                                        : _pathToSurfaceMap[pathEntryIndex];
-                    if (surfaceEntry == kObjectEntryIndexNull)
-                    {
-                        // Legacy footpath object
-                        dst2->setLegacyPathEntryIndex(pathEntryIndex);
-                    }
-                    else
-                    {
-                        // Surface / railing
-                        dst2->setSurfaceEntryIndex(surfaceEntry);
-                        dst2->setRailingsEntryIndex(_pathToRailingMap[pathEntryIndex]);
-                    }
-
-                    dst2->setQueueBannerDirection(src2->GetQueueBannerDirection());
-                    dst2->setSloped(src2->IsSloped());
-                    dst2->setSlopeDirection(src2->GetSlopeDirection());
-                    dst2->setRideIndex(RCT12RideIdToOpenRCT2RideId(src2->GetRideIndex()));
-                    dst2->setStationIndex(StationIndex::FromUnderlying(src2->GetStationIndex()));
-                    dst2->setWide(src2->IsWide());
-                    dst2->setIsQueue(src2->IsQueue());
-                    dst2->setHasQueueBanner(src2->HasQueueBanner());
-                    dst2->setEdges(src2->GetEdges());
-                    dst2->setCorners(src2->GetCorners());
-                    dst2->setAddition(src2->GetAddition());
-                    dst2->setAdditionIsGhost(src2->AdditionIsGhost());
-                    dst2->setAdditionStatus(src2->GetAdditionStatus());
-                    dst2->setIsBroken(src2->IsBroken());
-                    dst2->setIsBlockedByVehicle(src2->IsBlockedByVehicle());
-
+                    ImportS6PathData(*dst->asPath(), *src->asPath(), _pathToSurfaceMap,
+                        _pathToQueueSurfaceMap, _pathToRailingMap);
                     break;
-                }
                 case RCT12TileElementType::track:
                 {
                     auto dst2 = dst->asTrack();
