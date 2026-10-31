@@ -51,10 +51,14 @@ if (AMIGA)
     if (OPENRCT2_AMIGA_OPEN4_RUNTIME)
         target_sources(libopenrct2 PRIVATE
             "${PROJECT_SOURCE_DIR}/amiga/core/pthread_format.cpp"
+            "${PROJECT_SOURCE_DIR}/amiga/core/soft_float_math.cpp"
             "${PROJECT_SOURCE_DIR}/amiga/core/amiga_atomics.cpp")
         target_link_options(libopenrct2 INTERFACE "-Wl,--wrap=snprintf"
             "-Wl,-u,___wrap_snprintf" "-Wl,-u,___wrap_pthread_create"
             "-Wl,-u,__ZN9__gnu_cxx18__exchange_and_addEPVii")
+        target_link_options(libopenrct2 INTERFACE
+            "-Wl,--wrap=floorf" "-Wl,--wrap=ceilf" "-Wl,--wrap=sqrtf"
+            "-Wl,-u,___wrap_floorf" "-Wl,-u,___wrap_ceilf" "-Wl,-u,___wrap_sqrtf")
     endif ()
     # amiga_compat.cpp lives in this archive but is only needed by libstdc++, which the
     # linker scans later: force the two symbols in so the member is pulled.

@@ -606,6 +606,7 @@ public:
      */
     void TriggerResize() override
     {
+        AMIGA_TRACE("ui: resize scale quality begin");
         char scaleQualityBuffer[4];
         _scaleQuality = ScaleQuality::smoothNearestNeighbour;
         if (Config::Get().general.windowScale == std::floor(Config::Get().general.windowScale))
@@ -620,10 +621,13 @@ public:
         }
         snprintf(scaleQualityBuffer, sizeof(scaleQualityBuffer), "%d", static_cast<int32_t>(scaleQuality));
         SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, scaleQualityBuffer);
+        AMIGA_TRACE("ui: resize scale quality ready");
 
         int32_t width, height;
         SDL_GetWindowSize(_window, &width, &height);
+        AMIGA_TRACE("ui: resize dimensions ready");
         OnResize(width, height);
+        AMIGA_TRACE("ui: resize complete");
     }
 
     void CreateWindow() override

@@ -185,3 +185,27 @@ candidate version/startup/shutdown pass with FPU disabled, dirty heap and
 sanitizer. Single-precision aspect division also passes independently.
 The real WinUAE Guru has not been reproduced here; desktop-query bypass is
 a targeted candidate, not a confirmed diagnosis or full-game validation.
+
+### Single-precision runtime repair (0.17)
+
+The next WinUAE trace passes resolution collection and fullscreen setup,
+then stops inside TriggerResize. Its first maths call is floorf(windowScale).
+Disassembly of the delivered 0.16 executable confirms that open4's base-libm
+floorf, ceilf and sqrtf each call themselves directly with no termination.
+An isolated native floor(float) probe also fails to return. This is a
+runtime recursion defect, not evidence of an FPU opcode in those functions.
+
+The open4 compatibility layer now wraps all three symbols and calls their
+software double equivalents through volatile function pointers, preventing
+GCC from folding the adapter back into the broken float symbol. Forced
+archive extraction applies the repair to GUI, CLI and linked diagnostics.
+Extra resize checkpoints distinguish scale quality, dimensions and resize
+completion. The regression exercises actual float overloads and C symbols;
+the previous double-only checks could not detect this defect.
+
+The isolated repaired floor probe and actual TriggerResize method with mock
+SDL/OnResize pass on a 68060 with FPU disabled, dirty heap and sanitizer.
+The full native runtime regression (including negative zero, infinities and
+NaNs) and the rebuilt GUI version/startup/shutdown check also pass under
+those settings, with 64 MB RAM and a 1 MB stack and without FPSP emulation.
+Real WinUAE startup beyond this point and 64 MB gameplay remain unverified.
