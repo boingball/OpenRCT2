@@ -43,6 +43,7 @@
 #include <openrct2/drawing/RenderTarget.h>
 #include <openrct2/interface/ScreenCoords.hpp>
 #include <openrct2/interface/Viewport.h>
+#include <openrct2/platform/AmigaTrace.h>
 #include <openrct2/scenes/title/TitleSequencePlayer.h>
 #include <openrct2/ui/UiContext.h>
 #include <openrct2/ui/WindowManager.h>
@@ -839,9 +840,12 @@ private:
         OnResize(width, height);
 
         UpdateFullscreenResolutions();
-
+        AMIGA_TRACE("ui: initial resolution list ready");
+        AMIGA_TRACE("ui: applying fullscreen setting");
         SetFullscreenMode(static_cast<FullscreenMode>(Config::Get().general.fullscreenMode));
+        AMIGA_TRACE("ui: fullscreen setting applied");
         TriggerResize();
+        AMIGA_TRACE("ui: window setup complete");
     }
 
     void OnResize(int32_t width, int32_t height)
@@ -881,38 +885,36 @@ private:
 
     void UpdateFullscreenResolutions()
     {
-        // Query number of display modes
+        AMIGA_TRACE("ui: resolution query begin");
         int32_t displayIndex = SDL_GetWindowDisplayIndex(_window);
         int32_t numDisplayModes = SDL_GetNumDisplayModes(displayIndex);
+        AMIGA_TRACE("ui: resolution count received");
 
-        // Get desktop aspect ratio
-        SDL_DisplayMode mode;
+        SDL_DisplayMode mode{};
+#ifndef __amigaos__
+        // Only other platforms filter by the desktop aspect ratio. The Amiga
+        // RTG backend offers its actual 8-bit modes regardless of Workbench.
         SDL_GetDesktopDisplayMode(displayIndex, &mode);
-
-        // Get resolutions
-        auto resolutions = std::vector<Resolution>();
         float desktopAspectRatio = static_cast<float>(mode.w) / mode.h;
+#endif
+        auto resolutions = std::vector<Resolution>();
         for (int32_t i = 0; i < numDisplayModes; i++)
         {
-            SDL_GetDisplayMode(displayIndex, i, &mode);
+            if (SDL_GetDisplayMode(displayIndex, i, &mode) != 0)
+                continue;
             if (mode.w > 0 && mode.h > 0)
             {
-                float aspectRatio = static_cast<float>(mode.w) / mode.h;
 #ifdef __amigaos__
-                // An RTG fullscreen mode is a real mode switch on its own screen, so a 4:3 mode is fine on a
-                // 16:9 Workbench; the aspect filter would hide 640x480 and 800x600 behind a wide desktop.
                 const bool aspectOk = true;
-                (void)aspectRatio;
-                (void)desktopAspectRatio;
 #else
+                float aspectRatio = static_cast<float>(mode.w) / mode.h;
                 const bool aspectOk = std::fabs(desktopAspectRatio - aspectRatio) < 0.1f;
 #endif
                 if (aspectOk)
-                {
                     resolutions.push_back({ mode.w, mode.h });
-                }
             }
         }
+        AMIGA_TRACE("ui: resolutions collected");
 
         // Sort by area
         std::sort(resolutions.begin(), resolutions.end(), [](const Resolution& a, const Resolution& b) -> bool {
@@ -921,6 +923,7 @@ private:
             return areaA < areaB;
         });
 
+        AMIGA_TRACE("ui: resolutions sorted");
         // Remove duplicates
         auto last = std::unique(resolutions.begin(), resolutions.end(), [](const Resolution& a, const Resolution& b) -> bool {
             return (a.Width == b.Width && a.Height == b.Height);
@@ -951,6 +954,7 @@ private:
         }
 
         _fsResolutions = resolutions;
+        AMIGA_TRACE("ui: resolutions stored");
     }
 
     Resolution GetClosestResolution(int32_t inWidth, int32_t inHeight)

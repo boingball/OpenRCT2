@@ -164,3 +164,24 @@ trace entries. The latter launcher temporarily disables audio for an A/B
 comparison. Both retain the normal game launcher and existing configuration.
 The reported post-screen Guru is not diagnosed or fixed by these helper
 changes; its trace is needed to identify the failing stage.
+
+### RTG startup candidate (0.16)
+
+A WinUAE trace reaches a 640x480 depth-8 screen, drawing-buffer resize,
+and enumeration of 29 distinct RTG modes, then stops before G1 loading.
+The next source-level operation queried the Workbench desktop mode even
+though Amiga aspect filtering accepts every valid RTG mode and never needs
+that result. The Amiga branch now omits the desktop query and aspect-ratio
+floating-point calculations; other platforms retain their aspect filter.
+Failed per-mode queries are ignored. Additional opt-in trace checkpoints
+cover collection/sort/storage, fullscreen application, window completion,
+user folders, audio and original-user-file copying.
+
+An isolated harness compiled the actual updated resolution method and
+exercised 29 inputs (duplicates, failed/invalid modes and widescreen),
+sorting, default selection and preservation of explicit settings. It
+asserts the desktop query is never called. The native harness and full
+candidate version/startup/shutdown pass with FPU disabled, dirty heap and
+sanitizer. Single-precision aspect division also passes independently.
+The real WinUAE Guru has not been reproduced here; desktop-query bypass is
+a targeted candidate, not a confirmed diagnosis or full-game validation.

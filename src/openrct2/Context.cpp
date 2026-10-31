@@ -469,22 +469,30 @@ namespace OpenRCT2
 
             if (!gOpenRCT2Headless)
             {
+                AMIGA_TRACE("init: creating window");
                 _uiContext->CreateWindow();
+                AMIGA_TRACE("init: window created");
             }
 
+            AMIGA_TRACE("init: preparing user folders");
             EnsureUserContentDirectoriesExist();
+            AMIGA_TRACE("init: user folders ready");
 
             if (!gOpenRCT2Headless)
             {
+                AMIGA_TRACE("init: initialising audio");
                 Audio::Init();
                 Audio::PopulateDevices();
                 Audio::InitRideSoundsAndInfo();
                 Audio::gGameSoundsOff = !Config::Get().sound.masterSoundEnabled;
+                AMIGA_TRACE("init: audio initialised");
             }
 
             auto intent = Intent(INTENT_ACTION_INIT_CHAT);
             _uiContext->GetWindowManager()->BroadcastIntent(intent);
+            AMIGA_TRACE("init: copying original user files");
             CopyOriginalUserFilesOver();
+            AMIGA_TRACE("init: original user files ready");
 
             if (!gOpenRCT2NoGraphics)
             {
