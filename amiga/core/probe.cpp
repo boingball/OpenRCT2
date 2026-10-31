@@ -37,17 +37,47 @@ extern "C"
 static FILE* report;
 static thread_local int threadLocalMarker = 0;
 
+// Do not use printf-family formatting here: open4's vfprintf saves FP
+// registers even for integer-only formats, defeating -msoft-float.
 static void print(const char* format, ...)
 {
+    char output[1024];
+    size_t used = 0;
+    auto put = [&](char c) { if (used + 1 < sizeof(output)) output[used++] = c; };
     va_list args;
     va_start(args, format);
-    std::vprintf(format, args);
+    while (*format)
+    {
+        if (*format != '%') { put(*format++); continue; }
+        ++format;
+        if (*format == '%') { put(*format++); continue; }
+        if (*format == 's')
+        {
+            const char* text = va_arg(args, const char*);
+            while (*text) put(*text++);
+            ++format;
+            continue;
+        }
+        unsigned width = 0;
+        while (*format >= '0' && *format <= '9') width = width * 10 + (*format++ - '0');
+        bool isLong = *format == 'l';
+        if (isLong) ++format;
+        const unsigned base = *format++ == 'x' ? 16 : 10;
+        unsigned long value = isLong ? va_arg(args, unsigned long) : va_arg(args, unsigned);
+        char digits[32];
+        unsigned count = 0;
+        do { digits[count++] = "0123456789abcdef"[value % base]; value /= base; } while (value);
+        while (width > count) { put('0'); --width; }
+        while (count) put(digits[--count]);
+    }
     va_end(args);
+    output[used] = 0;
+    std::fputs(output, stdout);
+    std::fflush(stdout);
     if (report != nullptr)
     {
-        va_start(args, format);
-        std::vfprintf(report, format, args);
-        va_end(args);
+        std::fputs(output, report);
+        std::fflush(report);
     }
 }
 
@@ -104,8 +134,9 @@ static void test_threads()
 int main(int argc, char** argv)
 {
     using namespace OpenRCT2;
+    print("Probe 0.4: entered main (integer-only output)\n");
     report = std::fopen("OpenRCT2CoreProbe.txt", "w");
-    print("OpenRCT2 C++23 core ABI/runtime probe 0.3\n");
+    print("OpenRCT2 C++23 core ABI/runtime probe 0.4\n");
     print("This is a memory/runtime probe, not the park simulation.\n");
     print("Profile: %s\nPointer bits: %lu\n", MemoryProfile::kSmall ? "small-memory" : "standard",
         static_cast<unsigned long>(sizeof(void*) * 8));
@@ -120,6 +151,7 @@ int main(int argc, char** argv)
     int result = 0;
     try
     {
+        print("Stage: vector/sort/RNG\n");
         random_engine_t engine(12345);
         std::vector<uint32_t> values;
         for (int i = 0; i < 1024; i++) values.push_back(engine());
@@ -129,16 +161,31 @@ int main(int argc, char** argv)
         hash ^= ByteSwapBE<uint32_t>(0x12345678u);
         print("Vector/sort/core RNG/endian checksum: %08lx\n", static_cast<unsigned long>(hash));
 
+        print("Stage: exceptions\n");
         bool exceptionCaught = false;
         try { throw std::runtime_error("probe"); }
         catch (const std::runtime_error&) { exceptionCaught = true; }
         if (!exceptionCaught) throw std::runtime_error("C++ exception test failed");
 
-        test_threads();
-        print("C++ threads/mutex/condition_variable/atomic/thread_local/call_once: PASS\n");
-
-        if (argc == 2 && std::strcmp(argv[1], "ALLOCATE") == 0)
+        bool allocate = false;
+        bool threads = false;
+        for (int i = 1; i < argc; ++i)
         {
+            if (std::strcmp(argv[i], "ALLOCATE") == 0) allocate = true;
+            else if (std::strcmp(argv[i], "THREADS") == 0) threads = true;
+            else throw std::runtime_error("Usage: OpenRCT2CoreProbe [ALLOCATE] [THREADS]");
+        }
+        if (threads)
+        {
+            print("Stage: threads (experimental runtime test)\n");
+            test_threads();
+            print("C++ threads/mutex/condition_variable/atomic/thread_local/call_once: PASS\n");
+        }
+        else print("Threads: SKIPPED (run THREADS to test separately)\n");
+
+        if (allocate)
+        {
+            print("Stage: allocation/touch\n");
             // Reserve/touch the same number of bytes as GameState, without constructing the game.
             std::unique_ptr<unsigned char[]> block(new (std::nothrow) unsigned char[sizeof(GameState_t)]);
             if (!block) throw std::runtime_error("Cannot reserve a GameState-sized block");

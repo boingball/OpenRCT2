@@ -1,12 +1,32 @@
-# OpenRCT2 Amiga core investigation — milestone 0.3
+# OpenRCT2 Amiga core investigation — milestone 0.4
 
 The 0.1 graphics runner has passed the user's WinUAE RTG test with original G1
 graphics. This milestone tackles the **actual engine**, starting with memory,
 a real simulation benchmark on the host, and native C++ runtime probes.
 
 **There is no native Amiga park simulation executable yet.** The downloadable
-0.3 executables below are diagnostics. The 0.1 graphics runner remains the
+0.4 executables below are diagnostics. The 0.1 graphics runner remains the
 working RTG test.
+
+## WinUAE crash diagnostic update (0.4)
+
+The open4-linked printf formatter unconditionally saves FPU registers even
+for integer-only output. Compiling the probe with `-msoft-float` does not
+remove those instructions from the linked runtime. This can explain a
+line-F failure before any output on a machine without usable FPU support;
+it is not yet a confirmed diagnosis of the user's WinUAE exception.
+
+Probe 0.4 uses a small integer/string formatter instead. Each progress line
+is flushed to both Shell and report. Run the small probe without arguments
+first, then ALLOCATE. THREADS is now opt-in so baseline/memory tests can be
+checked independently. A baseline PASS does not qualify the threading runtime.
+The full-profile probe is optional and needs substantially more memory.
+
+Validation: both profiles build with open4; the host tests pass with THREADS
+and ALLOCATE. Under volamos 68060 with FPU disabled, baseline and allocation
+pass for small (64 MiB emulated RAM) and full (128 MiB) profiles. The original
+download fails in that environment. THREADS still stops in volamos and is
+unqualified on AmigaOS; no WinUAE success is claimed for this update.
 
 ## What changed
 
@@ -59,7 +79,9 @@ Unpack onto an Amiga hard disk. From a Shell in the drawer:
 
 ```text
 Protect OpenRCT2CoreProbe +e
+OpenRCT2CoreProbe
 OpenRCT2CoreProbe ALLOCATE
+OpenRCT2CoreProbe THREADS
 ```
 
 It writes `OpenRCT2CoreProbe.txt` in the current drawer, and prints to the
@@ -68,8 +90,8 @@ it does not initialise GameState or start the engine. Omitting ALLOCATE skips
 that reservation. The optional `OpenRCT2CoreProbe-Full` reports the normal
 engine's layout; only run its ALLOCATE mode if sufficient Fast RAM is free.
 
-No original game data or other runtime library needs installing for these
-libnix-linked probes. Use a 68060 with Fast RAM. Stack setup requests 256 KiB.
+No original game data is needed. The threading test depends on the
+OpenAmigaGCC pthread runtime; see the toolchain documentation for its setup. Use a 68060 with Fast RAM. Stack setup requests 256 KiB.
 
 ## Remaining native blockers
 

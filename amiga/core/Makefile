@@ -20,7 +20,7 @@ $(BUILD)/probe-full: probe.cpp $(ROOT)/src/openrct2/MemoryProfile.h | $(BUILD)
 	$(HOST_CXX) $(FLAGS) $< -o $@
 host-probes: $(BUILD)/probe-small $(BUILD)/probe-full
 test: host-probes
-	cd $(BUILD) && ./probe-small ALLOCATE && ./probe-full
+	cd $(BUILD) && ./probe-small ALLOCATE && ./probe-small THREADS && ./probe-full
 clean:
 	rm -rf $(BUILD)
 -include $(wildcard $(BUILD)/*.d)
