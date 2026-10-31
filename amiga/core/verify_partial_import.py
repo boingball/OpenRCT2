@@ -99,6 +99,8 @@ def main():
             case.mkdir(parents=True, exist_ok=True)
             overview = case / "ImportedMap.ppm"
             overview.unlink(missing_ok=True)
+            amap = case / "ImportedMap.amap"
+            amap.unlink(missing_ok=True)
             before = hashlib.sha256(source.read_bytes()).hexdigest()
             if platform == "host":
                 command = prefix + [str(source)]
@@ -110,7 +112,7 @@ def main():
             (case / "run.log").write_text(run.stdout)
             assert hashlib.sha256(source.read_bytes()).hexdigest() == before, "Input save was modified"
             if source.name in bad:
-                assert run.returncode == 20 and "FAIL:" in run.stdout and not overview.exists(), run.stdout
+                assert run.returncode == 20 and "FAIL:" in run.stdout and not overview.exists() and not amap.exists(), run.stdout
                 continue
             assert run.returncode == 0 and "Partial GameState import: PASS" in run.stdout, run.stdout
             assert "Native path status/RideId union: PASS" in run.stdout, run.stdout
@@ -120,7 +122,18 @@ def main():
             assert match[1] == match[2], run.stdout
             fp = re.search(r"Partial native state fingerprint: ([0-9a-f]{8})", run.stdout)
             assert fp and overview.exists(), run.stdout
-            result = {"size": int(match[1]), "surfaces": int(match[3]), "paths": int(match[4]),
+            wire = amap.read_bytes()
+            magic, version, side, cells, count, source_fp, payload_hash = struct.unpack_from("<4sHHIIII", wire)
+            assert magic == b"AMAP" and version == 1 and side == int(match[1]) and cells == side*side
+            assert count == int(match[3]) + int(match[4]) and source_fp == int(fp[1], 16)
+            assert wire[24:32] == bytes(8) and len(wire) == 32 + (cells+1)*4 + count*8
+            checksum = 2166136261
+            for byte in wire[32:]: checksum = ((checksum ^ byte)*16777619) & 0xffffffff
+            assert checksum == payload_hash
+            offsets = struct.unpack_from("<" + "I"*(cells+1), wire, 32)
+            assert offsets[0] == 0 and offsets[-1] == count
+            assert all(a < b for a,b in zip(offsets,offsets[1:]))
+            result = {"map_sha256": hashlib.sha256(wire).hexdigest(), "size": int(match[1]), "surfaces": int(match[3]), "paths": int(match[4]),
                       "fingerprint": fp[1], "overview_sha256": hashlib.sha256(overview.read_bytes()).hexdigest()}
             results[platform][source.name] = result
             if source == negative_file:

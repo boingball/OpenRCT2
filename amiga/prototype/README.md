@@ -1,4 +1,55 @@
-# OpenRCT2 Amiga graphics runner 0.1
+# OpenRCT2 Amiga imported park viewer 0.8
+
+Targets 68060, 64 MB Fast RAM, AmigaOS 3.1+ and an 8-bit P96/CyberGraphX RTG
+mode. This milestone displays **real imported terrain/path data**, with
+simplified geometry and colours. It does not simulate the park or display
+rides, scenery or guests.
+
+The 0.8 download includes pre-exported maps, so no G1 data or conversion step
+is needed to try the viewer. In its drawer, run:
+
+```text
+Protect OpenRCT2ParkView +e
+OpenRCT2ParkView MAP=TestPark.amap
+OpenRCT2ParkView MAP=BusyPark.amap LOW
+```
+
+Use cursor keys to pan, `[` to zoom out, `]` to zoom in, Home/H to centre,
+G for the terrain grid, and Escape to quit. B starts a ten-second benchmark;
+in map view it forces a complete map redraw each frame and measures that plus
+RTG copy and frame wait. Normal stationary map viewing caches the background.
+Results use the existing `OpenRCT2Runner.bench` filename. This is a graphics
+benchmark, with no simulation cost included.
+
+For another classic SV6 save, use a writable drawer:
+
+```text
+OpenRCT2ImportProbe MyPark.sv6
+OpenRCT2ParkView MAP=ImportedMap.amap
+```
+
+The importer writes its report, an overview PPM and the portable `.amap` file.
+It reads the source save without modifying it. Only terrain, paths and selected
+metadata are imported. SC6, modern `.park` and extended Classic saves are not
+supported. Files with invalid checksums, bounds or tile chains are rejected.
+The viewer independently validates the AMAP structure and checksum before
+opening its display; [MAP_FORMAT.md](MAP_FORMAT.md) documents the format.
+
+The map uses diagnostic terrain, water and queue colours. Water/terrain and
+path connections are approximate rendering, not OpenRCT2's full painter or
+object manager. Optional original RCT2 G1 data provides the existing sprite
+browser and flat grass sprite at original zoom. No original game assets are
+bundled. The previous graphics demo remains available by omitting `MAP=`.
+
+Verification covers host ASan/UBSan, bare 68060 parser/render tests, HUNK
+startup/OS ABI/RTG copy and allocation/file cleanup through mocked libraries.
+The captured native map viewport matches host preview pixels at both sizes.
+The mock is not P96/CGX: this build still needs real WinUAE/Amiga validation.
+No native map frame rate is claimed.
+
+## Original graphics demo
+
+# Graphics runner 0.1
 
 First native executable for investigating a classic Amiga port. Targets a
 68060, 64 MB or more Fast RAM, AmigaOS 3.1+, and an RTG graphics card using

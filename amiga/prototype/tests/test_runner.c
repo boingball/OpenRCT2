@@ -149,10 +149,62 @@ static uint32_t test_scene(int w,int h) {
     hash=checksum(a,bytes);
     free(a);free(b);free(backa);free(backb);free(old);return hash;
 }
+static void putle(uint8_t *p,uint32_t n){p[0]=(uint8_t)n;p[1]=(uint8_t)(n>>8);p[2]=(uint8_t)(n>>16);p[3]=(uint8_t)(n>>24);}
+static void map_hash(uint8_t *p,unsigned size){unsigned i;uint32_t h=2166136261u;for(i=32;i<size;i++)h=(h^p[i])*16777619u;putle(p+20,h);}
+static void test_park_map(void) {
+    uint8_t blob[32+26*4+26*8]={0},bad[sizeof(blob)];
+    static uint8_t a[640*480],b[640*480],ba[640*480],bb[640*480],old[640*480];
+    static Runner r,reference;
+    ParkMap parsed;
+    unsigned cell,n=0,k,res;
+    memcpy(blob,"AMAP",4);blob[4]=1;blob[6]=5;putle(blob+8,25);putle(blob+12,26);putle(blob+16,0x12345678);
+    for(cell=0;cell<25;cell++) {
+        uint8_t *record;
+        putle(blob+32+cell*4,n);
+        record=blob+32+26*4+n++*8;record[1]=2;
+        if(cell==1)record[1]=4;
+        if(cell==2)record[3]=0x10;
+        if(cell==3)record[5]=8;
+        if(cell==12){record=blob+32+26*4+n++*8;record[0]=1;record[1]=2;record[3]=0xff;record[4]=4;}
+    }
+    putle(blob+32+25*4,n);map_hash(blob,sizeof(blob));
+    assert(park_map_open(&parsed,blob,sizeof(blob))&&parsed.side==5&&parsed.elements==26);
+    assert(!park_map_open(&parsed,NULL,sizeof(blob))&&!park_map_open(&parsed,blob,sizeof(blob)-1));
+    for(k=0;k<7;k++) {
+        memcpy(bad,blob,sizeof(blob));
+        switch(k){case 0:bad[0]='X';break;case 1:bad[4]=2;break;case 2:bad[6]=0;break;
+        case 3:putle(bad+32+4,999);break;case 4:bad[32+26*4]=9;break;
+        case 5:bad[32+26*4+3]=0xff;break;default:bad[32+26*4+2]=0x80;break;}
+        map_hash(bad,sizeof(bad));assert(!park_map_open(&parsed,bad,sizeof(bad)));
+    }
+    memcpy(bad,blob,sizeof(blob));bad[sizeof(bad)-1]^=1;assert(!park_map_open(&parsed,bad,sizeof(bad)));
+    for(res=0;res<2;res++) {
+        int w=res?320:640,h=res?240:480;unsigned frame;size_t bytes=(size_t)w*h;
+        runner_init(&r,a,ba,w,h);runner_init(&reference,b,bb,w,h);
+        assert(runner_set_map(&r,blob,sizeof(blob))&&runner_set_map(&reference,blob,sizeof(blob)));
+        for(frame=0;frame<50;frame++) {
+            int key=KEY_NONE;
+            if(frame%5==0)key=KEY_PREV;if(frame%7==0)key=KEY_NEXT;
+            if(frame%11==0)key=KEY_HOME;if(frame%3==0)key=KEY_GRID;
+            if(frame==10){r.pan_x=reference.pan_x=-9000;r.pan_y=reference.pan_y=6000;key=KEY_LEFT;}
+            if(frame==20){r.pan_x=reference.pan_x=9000;r.pan_y=reference.pan_y=-6000;key=KEY_RIGHT;}
+            if(frame==30)key=KEY_HOME;
+            runner_input(&r,key);runner_input(&reference,key);runner_input(&r,KEY_MORE);
+            memcpy(old,a,bytes);runner_render(&r);reference.full_redraw=1;runner_render(&reference);
+            assert(!memcmp(a,b,bytes)&&r.guests==0);
+            for(k=0;k<bytes;k++)if(old[k]!=a[k])assert(r.dirty[((k/w)/TILE_H)*(w/TILE_W)+(k%w)/TILE_W]);
+            memset(r.dirty,0,sizeof(r.dirty));
+        }
+        /* Avoid the cross libc's decimal formatter: its _itoa_word uses a
+         * 68020 64-bit multiply, unavailable on a bare 68060. */
+        printf("Imported map parsing/zoom/pan/clipping/dirty rectangles: PASS %s %08lx\n",res?"320x240":"640x480",(unsigned long)checksum(a,bytes));
+    }
+}
 int main(void) {
     uint32_t a,b;
     test_g1(); test_palette(); test_options(); test_upstream_fixture();
     a=test_scene(640,480); b=test_scene(320,240);
+    test_park_map();
     printf("G1 clipping/malformed files/palettes/options/dirty redraw: PASS\n640x480 %08lx 320x240 %08lx\n",(unsigned long)a,(unsigned long)b);
     return 0;
 }

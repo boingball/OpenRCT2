@@ -55,10 +55,11 @@ clean:
 # JSON forward headers are needed by the actual legacy S6Data declaration.
 # Point JSON_INCLUDE at an include root containing nlohmann/json_fwd.hpp.
 JSON_INCLUDE ?= $(BUILD)/headers
-IMPORT_SOURCES = $(filter-out save_probe.cpp,$(SAVE_SOURCES)) import_probe.cpp s6_partial_import.cpp \
+IMPORT_SOURCES = $(filter-out save_probe.cpp,$(SAVE_SOURCES)) import_probe.cpp s6_partial_import.cpp s6_map_export.cpp \
  $(ROOT)/src/openrct2/rct12/TileElementData.cpp \
  $(ROOT)/src/openrct2/rct2/S6ElementImport.cpp \
  $(ROOT)/src/openrct2/drawing/ColourData.cpp \
+ $(ROOT)/src/openrct2/world/tile_element/Slope.cpp \
  $(ROOT)/src/openrct2/world/tile_element/ElementData.cpp
 IMPORT_OBJECTS = $(addprefix $(BUILD)/import-native/,$(notdir $(IMPORT_SOURCES:.cpp=.o)))
 vpath %.cpp $(ROOT)/src/openrct2/drawing $(ROOT)/src/openrct2/rct12 $(ROOT)/src/openrct2/rct2 $(ROOT)/src/openrct2/world/tile_element

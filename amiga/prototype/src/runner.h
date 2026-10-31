@@ -5,6 +5,7 @@
 #define AMIGA_RUNNER_H
 #include <stdint.h>
 #include <stddef.h>
+#include "park_map.h"
 
 #define MAX_WIDTH 640
 #define MAX_HEIGHT 480
@@ -31,7 +32,7 @@ typedef struct { int x, y, w, h; } Rect;
 typedef struct {
     int width, height, bench;
     uint32_t mode;
-    char g1_path[512];
+    char g1_path[512], map_path[512];
 } Options;
 enum {
     KEY_NONE, KEY_QUIT, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN,
@@ -40,6 +41,8 @@ enum {
 };
 typedef struct {
     G1 g1;
+    ParkMap map;
+    int map_zoom, map_base;
     Canvas canvas;
     uint8_t *background;
     uint8_t dirty[MAX_DIRTY];
@@ -58,6 +61,8 @@ void default_palette(uint32_t rgb[256]);
 void options_init(Options *o);
 int options_parse(Options *o, const char *args, int length);
 void runner_init(Runner *r, uint8_t *frame, uint8_t *background, int w, int h);
+int runner_set_map(Runner *r, const void *data, uint32_t size);
+void runner_map_background(Runner *r, Canvas *c);
 void runner_input(Runner *r, int key);
 void runner_render(Runner *r);
 void runner_step(Runner *r, uint32_t elapsed_ticks, uint32_t frequency);

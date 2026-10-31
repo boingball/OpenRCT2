@@ -23,3 +23,5 @@ struct PartialS6State
 PartialS6State ImportS6TerrainAndMetadata(const char* path);
 uint32_t PartialS6Fingerprint(const PartialS6State& imported);
 void WritePartialS6Overview(const PartialS6State& imported, const char* path);
+
+void WritePartialS6Map(const PartialS6State& imported, const char* path);

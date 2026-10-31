@@ -249,11 +249,11 @@ void platform_close(void) {
     if (intuition) os_closelib(intuition); intuition=0;
     if (gfx) os_closelib(gfx); gfx=0;
 }
-__attribute__((used)) static const char version[]="$VER: OpenRCT2Runner 0.1 (30.10.2026) 68060 RTG graphics prototype";
+__attribute__((used)) static const char version[]="$VER: OpenRCT2ParkView 0.8 (31.10.2026) 68060 RTG graphics prototype";
 int main(void) {
     options_init(&runner_options);
     if (!options_parse(&runner_options,cli_args,(int)cli_arglen)) {
-        platform_log("Usage: OpenRCT2Runner [G1=\"path/Data/g1.dat\"] [LOW] [MODEID=0x...] [BENCH] [DIAGNOSTIC]\n"); return 20;
+        platform_log("Usage: OpenRCT2Runner [MAP=\"ImportedMap.amap\"] [G1=\"path/Data/g1.dat\"] [LOW] [MODEID=0x...] [BENCH] [DIAGNOSTIC]\n"); return 20;
     }
     return runner_main();
 }

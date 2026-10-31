@@ -63,7 +63,7 @@ int main(int argc, char** argv)
         return 20;
     }
     report = std::fopen("OpenRCT2ImportProbe.txt", "w");
-    print("OpenRCT2 partial native GameState import 0.7\n");
+    print("OpenRCT2 partial native GameState import 0.8\n");
     print("Terrain/paths and selected metadata only; no simulation.\n");
     int result = 0;
     try
@@ -91,6 +91,8 @@ int main(int argc, char** argv)
         print("Native tile pointer index: PASS\n");
         print("Partial native state fingerprint: %08lx\n", static_cast<unsigned long>(PartialS6Fingerprint(imported)));
         WritePartialS6Overview(imported, "ImportedMap.ppm");
+        WritePartialS6Map(imported, "ImportedMap.amap");
+        print("RTG viewer map: ImportedMap.amap\n");
         print("Terrain/path overview: ImportedMap.ppm\n");
         print("Partial GameState import: PASS\n");
         print("Objects, rides and entities are NOT imported. This state cannot run simulation.\n");

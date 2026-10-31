@@ -10,7 +10,7 @@ from pathlib import Path
 import machine68k as m
 
 
-def run(executable, args, w, h):
+def run(executable, args, w, h, map_file=None, expected_preview=None, expected_fail=False):
     mc = m.Machine(m.CPUType.M68040, 8192)
     mem, cpu = mc.mem, mc.cpu
     def invalid(mode, width, address):
@@ -84,9 +84,15 @@ def run(executable, args, w, h):
     cpu.w_sp(0x7F0000)
     cpu.w_reg(m.Register.A0, argument_addr)
     cpu.w_reg(m.Register.D0, len(args))
+    map_bytes = Path(map_file).read_bytes() if map_file else None
+    if expected_fail:
+        map_bytes=map_bytes[:-1]+bytes([map_bytes[-1]^1])
+    file_position = 0
+    file_open = False
     allocation = 0x300000
     live = {}
     frame = bytearray(w * h)
+    palette = [(0,0,0)]*256
     frames = 0
     copies = 0
     clock = 0
@@ -112,11 +118,23 @@ def run(executable, args, w, h):
         mc.execute(100000)
         pc = cpu.r_pc()
         if pc == 0x70000:
+            if expected_fail:
+                assert reg("D0")==20 and not live and not file_open and frames==0
+                assert b"Cannot load imported MAP" in b"".join(console)
+                print("Corrupt MAP rejected / allocations and DOS file cleaned up: PASS")
+                mc.cleanup();return
             assert reg("D0") == 0
             assert not live, live
             assert {"screen", "window", "timer"}.issubset(closed)
             assert frames == 3 and copies > 0
-            assert len(set(frame)) > 15
+            assert len(set(frame)) > (4 if map_file else 15)
+            assert not file_open
+            if expected_preview:
+                header1,dimensions,maximum,pixels=Path(expected_preview).read_bytes().split(b"\n",3)
+                assert header1==b"P6" and dimensions==f"{w} {h}".encode() and maximum==b"255"
+                native_pixels=b"".join(bytes(palette[index]) for index in frame[48*w:(h-48)*w])
+                assert native_pixels==pixels[48*w*3:(h-48)*w*3], "Native viewport differs from host"
+                print("Native RTG viewport pixels match host: PASS")
             print(f"HUNK/relocations/Amiga startup/OS ABI/RTG copy/cleanup: PASS {w}x{h}")
             mc.cleanup()
             return
@@ -138,7 +156,7 @@ def run(executable, args, w, h):
                 result = libs[libname]
             elif lvo == -198:
                 n, flags = reg("D0"), reg("D1")
-                assert flags & 4 and n == w * h
+                assert flags & 4 and (n == w * h or (map_bytes is not None and n == len(map_bytes)))
                 result = allocation
                 live[result] = n
                 allocation += (n + 15) & ~15
@@ -160,7 +178,24 @@ def run(executable, args, w, h):
             elif lvo == -378:
                 assert reg("A1") == message
         elif name == "dos.library":
-            if lvo == -60:
+            if lvo == -30:
+                if map_bytes is not None and string(reg("D1")) == "TestPark.amap":
+                    file_open=True;file_position=0;result=42
+                else: result=0
+            elif lvo == -36:
+                assert reg("D1")==42 and file_open
+                file_open=False
+            elif lvo == -66:
+                assert reg("D1")==42 and file_open
+                result=file_position
+                origin=reg("D3");offset=reg("D2")
+                if offset & 0x80000000:offset-=0x100000000
+                file_position=(len(map_bytes) if origin==1 else 0 if origin==0xffffffff else file_position)+offset
+            elif lvo == -42:
+                assert reg("D1")==42 and file_open
+                data=map_bytes[file_position:file_position+reg("D3")]
+                mem.w_block(reg("D2"),data);file_position+=len(data);result=len(data)
+            elif lvo == -60:
                 result = 1
             elif lvo == -48:
                 console.append(mem.r_block(reg("D2"), reg("D3")))
@@ -186,6 +221,7 @@ def run(executable, args, w, h):
             elif lvo == -882:
                 assert reg("A0") == screen + 44
                 assert mem.r32(reg("A1")) == 256 << 16
+                palette=[tuple(mem.r32(reg("A1")+4+(i*3+k)*4)>>24 for k in range(3)) for i in range(256)]
             elif lvo == -1056:
                 rp = reg("A0")
                 assert mem.r32(rp + 4) == bitmap
@@ -224,3 +260,9 @@ if __name__ == "__main__":
     executable = sys.argv[1]
     run(executable, "DIAGNOSTIC\n", 640, 480)
     run(executable, "LOW DIAGNOSTIC\n", 320, 240)
+    if len(sys.argv)>2:
+        run(executable,"DIAGNOSTIC MAP=TestPark.amap\n",640,480,sys.argv[2],sys.argv[3] if len(sys.argv)>3 else None)
+        run(executable,"LOW DIAGNOSTIC MAP=TestPark.amap\n",320,240,sys.argv[2],sys.argv[4] if len(sys.argv)>4 else None)
+
+    if len(sys.argv)>2:
+        run(executable,"DIAGNOSTIC MAP=TestPark.amap\n",640,480,sys.argv[2],expected_fail=True)

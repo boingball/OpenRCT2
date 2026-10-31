@@ -1,12 +1,37 @@
-# OpenRCT2 Amiga core investigation — milestone 0.7
+# OpenRCT2 Amiga core investigation — milestone 0.8
 
 The 0.1 graphics runner has passed the user's WinUAE RTG test with original G1
 graphics. This milestone tackles the **actual engine**, starting with memory,
 a real simulation benchmark on the host, and native C++ runtime probes.
 
 **There is no native Amiga park simulation executable yet.** The downloadable
-0.7 executables below are diagnostics. The 0.1 graphics runner remains the
-working RTG test.
+import executables below are diagnostics. The 0.8 viewer displays their
+terrain/path export through the existing RTG backend.
+
+## Imported terrain/path RTG viewer (0.8)
+
+OpenRCT2ImportProbe now writes ImportedMap.amap alongside its report and PPM.
+The portable export is produced from the actual partial GameState, using the
+engine's slope corner heights. It contains an explicit little-endian header,
+per-cell index and terrain/path records with a payload checksum. Source saves
+remain read only. The host and 68060 exports match byte for byte for both real
+parks and independent wire fixtures; all existing import rejection tests pass.
+
+The standalone C RTG runner accepts `MAP=ImportedMap.amap`. It displays terrain,
+corner elevations, cliffs, water, connected footpaths and queue colours, with
+four zoom levels. No original G1 file is required for this diagnostic view.
+See [the viewer instructions](../prototype/README.md) and
+[AMAP format](../prototype/MAP_FORMAT.md). This is a view of imported data,
+with simplified geometry and colours; rides, scenery, guest entities, object
+assets, construction tools and simulation are still absent.
+
+The Amiga HUNK passes relocation/startup/OS-call/cleanup tests through mocked
+Amiga libraries at 640x480 and 320x240; captured RTG viewport pixels match the
+host renderer. Corrupt map rejection also closes files and frees allocations.
+The parser/render tests pass on the host (ASan/UBSan, LeakSanitizer disabled)
+and QEMU's bare 68060 model, with identical hashes; the executable passes the
+unsupported-68060-instruction scan. These are not a real P96/CGX or WinUAE test
+and establish neither hardware compatibility nor frame rate.
 
 ## Partial native GameState import (0.7)
 
@@ -65,7 +90,8 @@ A rebuilt full host engine also passes the prior 1,000-tick busy-park and
 2,000-tick car-ride comparisons against the standard-profile baseline. This
 checks that the shared conversion/refactoring changes preserve the selected
 simulation fingerprints on the existing supported host. It does not establish
-that native Amiga simulation works. The 0.7 executable still needs WinUAE test.
+that native Amiga simulation works. The packaged 0.7 importer has also passed a repeat 68060/no-FPU, 64 MiB
+check, including malformed files; native import still needs WinUAE validation.
 
 Building this diagnostic requires the official nlohmann JSON forward headers,
 used by the actual S6Data declaration, as well as the existing compiler:
