@@ -22,13 +22,17 @@ struct SavedTrackSnapshot
 };
 
 // A deliberately isolated partial state. Never install it as the active
-// game state: guest fields are partial; objects, rides, vehicles and staff
+// game state: ride/guest fields are partial; objects, vehicles and staff
 // and other required simulation data are absent.
 struct PartialS6State
 {
     std::unique_ptr<OpenRCT2::GameState_t> state;
     std::unique_ptr<TilePointerIndex<OpenRCT2::TileElement>> tileIndex;
     std::array<uint32_t, 16> sourceTypes{};
+    uint32_t nativeRides=0, nativeTracks=0, ambiguousTracks=0, unresolvedTracks=0, invalidTrackStations=0;
+    uint32_t linkedGuestRides=0, unresolvedGuestRides=0, linkedQueueGuests=0, unresolvedQueueGuests=0;
+    uint32_t linkedQueuePaths=0, unresolvedQueuePaths=0;
+    uint32_t invalidStationCoords=0;
     uint32_t surfaces = 0;
     uint32_t paths = 0;
     uint32_t omittedElements = 0;

@@ -13,11 +13,14 @@
 struct RCT12TileElement;
 struct RCT12SurfaceElement;
 struct RCT12PathElement;
+struct RCT12TrackElement;
 namespace OpenRCT2
 {
     struct TileElement;
     struct SurfaceElement;
     struct PathElement;
+    struct TrackElement;
+    enum class TrackElemType : uint16_t;
 }
 namespace OpenRCT2::RCT2
 {
@@ -25,4 +28,6 @@ namespace OpenRCT2::RCT2
     void ImportS6SurfaceData(SurfaceElement&, const RCT12SurfaceElement&, std::span<const ObjectEntryIndex>);
     void ImportS6PathData(PathElement&, const RCT12PathElement&, std::span<const ObjectEntryIndex>,
         std::span<const ObjectEntryIndex>, std::span<const ObjectEntryIndex>);
+    void ImportS6TrackData(TrackElement&, const RCT12TrackElement&, TrackElemType,
+        uint16_t legacyRideType, bool isMaze);
 }

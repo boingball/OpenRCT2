@@ -21,6 +21,9 @@ on:
       - 'src/openrct2/world/tile_element/**'
       - 'src/openrct2/world/Footpath.cpp'
       - 'src/openrct2/drawing/Colour*.cpp'
+      - 'src/openrct2/ride/Ride.cpp'
+      - 'src/openrct2/ride/RideStationData.cpp'
+      - 'src/openrct2/ride/ted/TrackElemType.cpp'
       - '.github/workflows/amiga-core.yml'
 jobs:
   compare-profiles:

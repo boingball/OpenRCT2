@@ -756,11 +756,6 @@ namespace OpenRCT2
         return td;
     }
 
-    RideStation& Ride::getStation(StationIndex stationIndex)
-    {
-        return stations[stationIndex.ToUnderlying()];
-    }
-
     StationIndex::UnderlyingType Ride::getStationNumber(StationIndex in) const
     {
         StationIndex::UnderlyingType nullStationsSeen{ 0 };
@@ -773,21 +768,6 @@ namespace OpenRCT2
         }
 
         return in.ToUnderlying() - nullStationsSeen + 1;
-    }
-
-    const RideStation& Ride::getStation(StationIndex stationIndex) const
-    {
-        return stations[stationIndex.ToUnderlying()];
-    }
-
-    std::span<RideStation> Ride::getStations()
-    {
-        return stations;
-    }
-
-    std::span<const RideStation> Ride::getStations() const
-    {
-        return stations;
     }
 
     StationIndex Ride::getStationIndex(const RideStation* station) const

@@ -57,13 +57,16 @@ clean:
 JSON_INCLUDE ?= $(BUILD)/headers
 IMPORT_SOURCES = $(filter-out save_probe.cpp,$(SAVE_SOURCES)) import_probe.cpp s6_partial_import.cpp s6_map_export.cpp \
  $(ROOT)/src/openrct2/entity/EntityRegistryData.cpp \
+ $(ROOT)/src/openrct2/world/tile_element/TrackElementData.cpp \
+ $(ROOT)/src/openrct2/ride/RideStationData.cpp \
+ $(ROOT)/src/openrct2/ride/ted/TrackElemType.cpp \
  $(ROOT)/src/openrct2/rct12/TileElementData.cpp \
  $(ROOT)/src/openrct2/rct2/S6ElementImport.cpp \
  $(ROOT)/src/openrct2/drawing/ColourData.cpp \
  $(ROOT)/src/openrct2/world/tile_element/Slope.cpp \
  $(ROOT)/src/openrct2/world/tile_element/ElementData.cpp
 IMPORT_OBJECTS = $(addprefix $(BUILD)/import-native/,$(notdir $(IMPORT_SOURCES:.cpp=.o)))
-vpath %.cpp $(ROOT)/src/openrct2/entity $(ROOT)/src/openrct2/drawing $(ROOT)/src/openrct2/rct12 $(ROOT)/src/openrct2/rct2 $(ROOT)/src/openrct2/world/tile_element
+vpath %.cpp $(ROOT)/src/openrct2/ride $(ROOT)/src/openrct2/ride/ted $(ROOT)/src/openrct2/entity $(ROOT)/src/openrct2/drawing $(ROOT)/src/openrct2/rct12 $(ROOT)/src/openrct2/rct2 $(ROOT)/src/openrct2/world/tile_element
 $(BUILD)/import-native:
 	mkdir -p $@
 $(BUILD)/import-native/%.o: %.cpp | $(BUILD)/import-native

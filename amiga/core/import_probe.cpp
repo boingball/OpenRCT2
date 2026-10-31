@@ -5,6 +5,11 @@
 #include <cstring>
 #include <algorithm>
 #include <openrct2/entity/Guest.h>
+#include <openrct2/ride/Ride.h>
+#include <openrct2/world/tile_element/TrackElement.h>
+#include <openrct2/rct2/RCT2.h>
+#include <openrct2/rct2/S6ElementImport.h>
+#include <openrct2/ride/ted/TrackElemType.h>
 #include <stdexcept>
 
 #ifdef __amigaos__
@@ -112,6 +117,84 @@ static uint32_t checkNativeGuests(PartialS6State& imported)
     return hash;
 }
 
+static void testNativeTrackFields()
+{
+    using namespace OpenRCT2;
+    uint8_t raw[9]={0};raw[5]=101;raw[6]=0x34;raw[7]=0x12;
+    const auto* legacy=reinterpret_cast<const RCT12TrackElement*>(raw+1);
+    if(legacy->GetMazeEntry()!=0x1234)throw std::runtime_error("Unaligned legacy maze byte order failed");
+    TileElement tile;tile.clearAs(TileElementType::track);
+    RCT2::ImportS6TrackData(*tile.asTrack(),*legacy,TrackElemType::maze,RIDE_TYPE_MAZE,true);
+    if(tile.asTrack()->getMazeEntry()!=0x1234)throw std::runtime_error("Native maze union transfer failed");
+    tile.clearAs(TileElementType::track);
+    raw[1]=0x8a;raw[2]=0x60;raw[3]=6;raw[4]=8;raw[5]=2;raw[6]=0xa3;raw[7]=0x0e;raw[8]=2;
+    RCT2::ImportS6TileBase(tile,*reinterpret_cast<const RCT12TileElement*>(raw+1),false);
+    RCT2::ImportS6TrackData(*tile.asTrack(),*legacy,TrackElemType::beginStation,4,false);
+    const auto* track=tile.asTrack();
+    if(track->getRideIndex().ToUnderlying()!=2 || track->getSequenceIndex()!=3
+        ||track->getStationIndex().ToUnderlying()!=2 || !track->hasChain() || !track->hasCableLift()
+        ||!track->isInverted() ||!track->isBrakeClosed() ||!track->isIndestructible() ||!track->hasGreenLight())
+        throw std::runtime_error("Native station/flags transfer failed");
+    print("Track field conversion / station flags / unaligned maze union: PASS\n");
+}
+
+static uint32_t checkNativeRidesAndTracks(PartialS6State& imported)
+{
+    using namespace OpenRCT2;auto& state=*imported.state;
+    uint32_t hash=2166136261u,rides=0,tracks=0;
+    auto append=[&](uint64_t value,unsigned width){while(width--){hash=(hash^(value&255))*16777619u;value>>=8;}};
+    auto coord=[&](const auto& position,bool world){
+        append(position.isNull()?65535:position.x/(world?32:1),2);
+        append(position.isNull()?65535:position.y/(world?32:1),2);
+    };
+    for(auto& ride:state.rides)if(!ride.id.IsNull())
+    {
+        ++rides;append(ride.id.ToUnderlying(),2);append(ride.type,2);
+        append(static_cast<uint8_t>(ride.status),1);append(static_cast<uint8_t>(ride.mode),1);append(ride.numStations,1);
+        coord(ride.overallView,true);
+        if(ride.subtype!=kObjectEntryIndexNull)throw std::runtime_error("Unloaded ride object slot was treated as native object index");
+        for(auto vehicle:ride.vehicles)if(!vehicle.IsNull())throw std::runtime_error("Unloaded vehicle reference survived");
+        for(unsigned i=0;i<4;i++)
+        {
+            const auto& station=ride.getStation(StationIndex::FromUnderlying(i));
+            coord(station.start,true);append(station.height,1);append(station.length,1);append(station.depart,1);
+            append(station.queueTime,1);append(station.queueLength,2);append(station.segmentLength,4);append(station.segmentTime,2);
+            coord(station.entrance,false);coord(station.exit,false);append(station.lastPeepInQueue.ToUnderlying(),2);
+            if(!station.lastPeepInQueue.IsNull())
+            {
+                const auto* guest=state.entities.tryGetEntity(station.lastPeepInQueue);
+                if(!guest || guest->type!=EntityType::guest)throw std::runtime_error("Station guest reference is unresolved");
+            }
+        }
+    }
+    for(const auto& tile:state.tileElements)if(const auto* track=tile.asTrack())
+    {
+        ++tracks;const auto id=track->getRideIndex();
+        if(id.IsNull() || id.ToUnderlying()>=state.rides.size() || state.rides[id.ToUnderlying()].id!=id)
+            throw std::runtime_error("Native track ride reference invalid");
+        if(trackTypeIsStation(track->getTrackType()) && track->getStationIndex().ToUnderlying()>=state.rides[id.ToUnderlying()].numStations)
+            throw std::runtime_error("Native track station reference invalid");
+    }
+    if(rides!=imported.nativeRides || tracks!=imported.nativeTracks)throw std::runtime_error("Native ride/track counts differ");
+    for(auto id:state.entities.getEntityList(EntityType::guest))
+    {
+        const auto* guest=reinterpret_cast<const Guest*>(state.entities.getEntity(id));
+        if(!guest->currentRide.IsNull() && (state.rides[guest->currentRide.ToUnderlying()].id!=guest->currentRide
+            ||guest->currentRideStation.ToUnderlying()>=state.rides[guest->currentRide.ToUnderlying()].numStations))
+            throw std::runtime_error("Native guest ride reference invalid");
+        append(id.ToUnderlying(),2);append(guest->currentRide.ToUnderlying(),2);append(guest->currentRideStation.ToUnderlying(),1);
+    }
+    print("Actual native rides: %lu; tracks: %lu; ID/station/reference checks: PASS\n",static_cast<unsigned long>(rides),static_cast<unsigned long>(tracks));
+    print("Native tracks skipped: aliases %lu; missing rides %lu; invalid stations %lu\n",
+        static_cast<unsigned long>(imported.ambiguousTracks),static_cast<unsigned long>(imported.unresolvedTracks),static_cast<unsigned long>(imported.invalidTrackStations));
+    print("Guest ride links: %lu; unresolved %lu; station guest links: %lu; unresolved %lu\n",
+        static_cast<unsigned long>(imported.linkedGuestRides),static_cast<unsigned long>(imported.unresolvedGuestRides),
+        static_cast<unsigned long>(imported.linkedQueueGuests),static_cast<unsigned long>(imported.unresolvedQueueGuests));
+    print("Queue path ride/station links: %lu; unresolved cleared: %lu\n",static_cast<unsigned long>(imported.linkedQueuePaths),static_cast<unsigned long>(imported.unresolvedQueuePaths));
+    print("Invalid station coordinates cleared: %lu\n",static_cast<unsigned long>(imported.invalidStationCoords));
+    return hash;
+}
+
 int main(int argc, char** argv)
 {
     // Fixed output names never share the required .sv6 input extension.
@@ -129,15 +212,18 @@ int main(int argc, char** argv)
         return 20;
     }
     report = std::fopen("OpenRCT2ImportProbe.txt", "w");
-    print("OpenRCT2 partial native GameState import 0.12\n");
-    print("Terrain/paths, metadata, guest and ride/track snapshots; no simulation.\n");
+    print("OpenRCT2 partial native GameState import 0.13\n");
+    print("Native terrain/paths, partial rides/tracks/guests; no simulation.\n");
     int result = 0;
     try
     {
         testPathUnion();
+        testNativeTrackFields();
         testNativeEntityPool();
         print("Reading and importing SV6...\n");
         auto imported = ImportS6TerrainAndMetadata(argv[1]);
+        const auto rideFingerprint=checkNativeRidesAndTracks(imported);
+        print("Native ride/station fields fingerprint: %08lx\n",static_cast<unsigned long>(rideFingerprint));
         const auto nativeGuestFingerprint=checkNativeGuests(imported);
         print("Native guest fields fingerprint: %08lx\n",static_cast<unsigned long>(nativeGuestFingerprint));
         const auto& state = *imported.state;
@@ -173,7 +259,7 @@ int main(int argc, char** argv)
         print("RTG viewer map: ImportedMap.amap\n");
         print("Terrain/path overview: ImportedMap.ppm\n");
         print("Partial GameState import: PASS\n");
-        print("Guest import is partial; objects, rides, vehicles and staff are absent. No simulation.\n");
+        print("Ride/guest import is partial; objects, vehicles and staff are absent. No simulation.\n");
     }
     catch (const std::exception& error)
     {

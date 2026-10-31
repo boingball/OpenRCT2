@@ -45,14 +45,6 @@ namespace OpenRCT2
         owner |= (newOwner & kTileElementOwnerMask);
     }
 
-    const TrackElement* TileElementBase::asTrack() const
-    {
-        return as<TrackElement>();
-    }
-    TrackElement* TileElementBase::asTrack()
-    {
-        return as<TrackElement>();
-    }
     const SmallSceneryElement* TileElementBase::asSmallScenery() const
     {
         return as<SmallSceneryElement>();

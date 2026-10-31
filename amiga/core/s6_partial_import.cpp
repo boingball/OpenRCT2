@@ -1,6 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 #include "s6_partial_import.h"
 #include <openrct2/entity/Guest.h>
+#include <openrct2/world/tile_element/TrackElement.h>
+#include <openrct2/ride/Ride.h>
+#include <openrct2/ride/ted/TrackElemType.h>
 #include <openrct2/core/Endianness.h>
 #include <openrct2/core/MemoryStream.h>
 #include <openrct2/core/Numerics.hpp>
@@ -135,6 +138,39 @@ PartialS6State ImportS6TerrainAndMetadata(const char* path)
             field(offsetof(RCT2::Ride, subtype)), status, field(offsetof(RCT2::Ride, mode)),
             field(offsetof(RCT2::Ride, overallView)), field(offsetof(RCT2::Ride, overallView) + 1), stations });
         ridePresent[slot] = true;
+        if (type >= RIDE_TYPE_COUNT) continue;
+        auto& native=state.rides[slot];
+        native.id=RideId::FromUnderlying(slot);native.type=type;
+        native.mode=static_cast<RideMode>(field(offsetof(RCT2::Ride, mode)));
+        native.status=static_cast<RideStatus>(status);native.numStations=stations;
+        native.subtype=kObjectEntryIndexNull; // object slots are not loaded manager indices
+        for(auto& vehicle:native.vehicles)vehicle=EntityId::GetNull();
+        const auto vx=field(offsetof(RCT2::Ride, overallView)),vy=field(offsetof(RCT2::Ride, overallView)+1);
+        if(vx<mapSize && vy<mapSize)native.overallView={vx*32,vy*32};else native.overallView.setNull();
+        for(unsigned i=0;i<4;i++)
+        {
+            auto& station=native.getStation(StationIndex::FromUnderlying(i));
+            const auto sx=field(offsetof(RCT2::Ride, stationStarts)+i*2),sy=field(offsetof(RCT2::Ride, stationStarts)+i*2+1);
+            if(sx<mapSize && sy<mapSize)station.start={sx*32,sy*32};
+            else {station.start.setNull();if(!(sx==255&&sy==255))++result.invalidStationCoords;}
+            station.height=field(offsetof(RCT2::Ride, stationHeights)+i);
+            station.length=field(offsetof(RCT2::Ride, stationLength)+i);
+            station.depart=field(offsetof(RCT2::Ride, stationDepart)+i);
+            station.queueTime=field(offsetof(RCT2::Ride, queueTime)+i);
+            station.queueLength=scalar<uint16_t>(*savedState,relative+offsetof(RCT2::Ride, queueLength)+i*2);
+            station.segmentLength=scalar<int32_t>(*savedState,relative+offsetof(RCT2::Ride, length)+i*4);
+            station.segmentTime=scalar<uint16_t>(*savedState,relative+offsetof(RCT2::Ride, time)+i*2);
+            station.lastPeepInQueue=EntityId::FromUnderlying(scalar<uint16_t>(*savedState,relative+offsetof(RCT2::Ride,lastPeepInQueue)+i*2));
+            for(unsigned exit=0;exit<2;exit++)
+            {
+                const auto offset=(exit?offsetof(RCT2::Ride,exits):offsetof(RCT2::Ride,entrances))+i*2;
+                const auto ex=field(offset),ey=field(offset+1);
+                auto& location=exit?station.exit:station.entrance;
+                if(ex<mapSize && ey<mapSize)location={ex,ey,station.height,0};
+                else {location.setNull();if(!(ex==255&&ey==255))++result.invalidStationCoords;}
+            }
+        }
+        state.ridesEndOfUsedRange=slot+1;++result.nativeRides;
     }
     std::array<ObjectEntryIndex, 32> terrain{};
     for (unsigned i = 0; i < terrain.size(); ++i) terrain[i] = i;
@@ -175,6 +211,26 @@ PartialS6State ImportS6TerrainAndMetadata(const char* path)
                             result.savedTracks.push_back({ static_cast<uint16_t>(x), static_cast<uint16_t>(y),
                                 { 2, src.baseHeight, static_cast<uint8_t>(base.flags & 0x30),
                                     src.getDirection(), raw[4], raw[5], raw[6], raw[7] } });
+                        }
+                    }
+                    if(type==RCT12TileElementType::track)
+                    {
+                        const auto* track=src.asTrack();const auto rawType=static_cast<unsigned>(track->GetTrackType());
+                        const auto ride=track->GetRideIndex();
+                        // IDs with flat-ride/wild-mouse/maze aliases need object classification.
+                        const bool ambiguous=rawType==95||rawType==100||rawType==101||rawType==110||rawType==111
+                            ||rawType==115||rawType==116||rawType==118||rawType==119||rawType==121||rawType==122||rawType==123;
+                        if(ambiguous)++result.ambiguousTracks;
+                        else if(ride==255 || state.rides[ride].id.IsNull())++result.unresolvedTracks;
+                        else if(track->GetStationIndex()>=4 || (rawType>=1 && rawType<=3
+                            &&track->GetStationIndex()>=state.rides[ride].numStations))++result.invalidTrackStations;
+                        else
+                        {
+                            check(state.tileElements.size()<MemoryProfile::kTileElements,"Native track capacity exceeded");
+                            auto& dst=state.tileElements.emplace_back();
+                            RCT2::ImportS6TileBase(dst,src,nextInvisible||restInvisible);dst.setLastForTile(false);
+                            RCT2::ImportS6TrackData(*dst.asTrack(),*track,static_cast<TrackElemType>(rawType),state.rides[ride].type,false);
+                            ++result.nativeTracks;nextInvisible=false;continue;
                         }
                     }
                     ++result.omittedElements; nextInvisible = false; continue;
@@ -235,9 +291,21 @@ PartialS6State ImportS6TerrainAndMetadata(const char* path)
         check(guestBase != nullptr, "Native guest slot allocation failed");
         auto* guest = reinterpret_cast<Guest*>(guestBase);
         guest->currentRide=RideId::GetNull();
+        guest->currentRideStation=StationIndex::GetNull();
         guest->interactionRideIndex=RideId::GetNull();
         guest->guestHeadingToRideId=RideId::GetNull();
         guest->guestNextInQueue=EntityId::GetNull();
+        const auto guestRide=p[offsetof(RCT2::Peep,CurrentRide)];
+        if(guestRide!=255)
+        {
+            const auto station=p[offsetof(RCT2::Peep,CurrentRideStation)];
+            if(!state.rides[guestRide].id.IsNull() && station<state.rides[guestRide].numStations)
+            {
+                guest->currentRide=RideId::FromUnderlying(guestRide);
+                guest->currentRideStation=StationIndex::FromUnderlying(station);++result.linkedGuestRides;
+            }
+            else ++result.unresolvedGuestRides;
+        }
         guest->x=x;guest->y=y;guest->z=z;guest->orientation=direction;
         guest->state=static_cast<PeepState>(peepState);
         guest->outsideOfPark=outside!=0;
@@ -264,6 +332,32 @@ PartialS6State ImportS6TerrainAndMetadata(const char* path)
         if (a.x + a.y != b.x + b.y) return a.x + a.y < b.x + b.y;
         return a.slot < b.slot;
     });
+    for(auto& ride:state.rides)if(!ride.id.IsNull())
+    {
+        for(unsigned i=0;i<4;i++)
+        {
+            auto& station=ride.getStation(StationIndex::FromUnderlying(i));
+            const auto id=station.lastPeepInQueue;
+            if(id.IsNull())continue;
+            const auto* guest=state.entities.tryGetEntity(id);
+            const auto* peep=reinterpret_cast<const Guest*>(guest);
+            if(i<ride.numStations && guest && guest->type==EntityType::guest
+                &&peep->currentRide==ride.id && peep->currentRideStation.ToUnderlying()==i)++result.linkedQueueGuests;
+            else {station.lastPeepInQueue=EntityId::GetNull();if(i<ride.numStations)++result.unresolvedQueueGuests;}
+        }
+    }
+    for(auto& tile:state.tileElements)if(auto* path=tile.asPath();path && path->isQueue())
+    {
+        const auto ride=path->getRideIndex();
+        if(ride.IsNull())continue;
+        if(ride.ToUnderlying()<state.rides.size() && state.rides[ride.ToUnderlying()].id==ride
+            && path->getStationIndex().ToUnderlying()<state.rides[ride.ToUnderlying()].numStations)++result.linkedQueuePaths;
+        else
+        {
+            path->setRideIndex(RideId::GetNull());path->setStationIndex(StationIndex::GetNull());
+            ++result.unresolvedQueuePaths;
+        }
+    }
     result.state->entities.resetEntitySpatialIndices();
     result.tileIndex = std::make_unique<TilePointerIndex<TileElement>>(
         RCT2::Limits::kMaxMapSize, state.tileElements.data(), state.tileElements.size());
@@ -305,6 +399,14 @@ uint32_t PartialS6Fingerprint(const PartialS6State& imported)
             append(p->getAddition(), 1); append(p->getAdditionStatus(), 1); append(p->isWide(), 1);
             append(p->hasQueueBanner(), 1); append(p->getQueueBannerDirection(), 1); append(p->additionIsGhost(), 1);
             append(p->isBroken(), 1); append(p->isBlockedByVehicle(), 1);
+        }
+        else if(const auto* p=tile.asTrack())
+        {
+            append(static_cast<uint16_t>(p->getTrackType()),2);append(p->getRideType(),2);
+            append(p->getRideIndex().ToUnderlying(),2);append(p->getSequenceIndex(),1);
+            append(p->getColourScheme(),1);append(p->getStationIndex().ToUnderlying(),1);
+            append(p->hasChain(),1);append(p->hasCableLift(),1);append(p->isInverted(),1);
+            append(p->isBrakeClosed(),1);append(p->isIndestructible(),1);append(p->getPhotoTimeout(),1);
         }
     }
     return hash;

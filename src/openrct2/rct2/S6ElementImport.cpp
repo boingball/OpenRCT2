@@ -12,6 +12,10 @@
 #include "../world/tile_element/TileElement.h"
 #include "../world/tile_element/SurfaceElement.h"
 #include "../world/tile_element/PathElement.h"
+#include "../world/tile_element/TrackElement.h"
+#include "../ride/Ride.h"
+#include "../ride/Track.h"
+#include "../ride/ted/TrackElemType.h"
 #include <stdexcept>
 
 namespace OpenRCT2::RCT2
@@ -91,5 +95,53 @@ namespace OpenRCT2::RCT2
         dst.setAdditionStatus(src.GetAdditionStatus());
         dst.setIsBroken(src.IsBroken());
         dst.setIsBlockedByVehicle(src.IsBlockedByVehicle());
+    }
+    void ImportS6TrackData(TrackElement& dst, const RCT12TrackElement& src,
+        TrackElemType trackType, uint16_t legacyRideType, bool isMaze)
+    {
+        dst.setTrackType(trackType);
+        dst.setRideType(legacyRideType);
+        dst.setSequenceIndex(src.GetSequenceIndex());
+        dst.setRideIndex(RCT12RideIdToOpenRCT2RideId(src.GetRideIndex()));
+        dst.setColourScheme(src.GetColourScheme());
+        dst.setHasChain(src.HasChain());
+        dst.setHasCableLift(src.HasCableLift());
+        dst.setInverted(src.IsInverted());
+        dst.setStationIndex(StationIndex::FromUnderlying(src.GetStationIndex()));
+        dst.setHasGreenLight(src.HasGreenLight());
+        // Brakes import as closed to preserve legacy behaviour
+        dst.setBrakeClosed(src.BlockBrakeClosed() || (trackType == TrackElemType::brakes));
+        dst.setIsIndestructible(src.IsIndestructible());
+        // Skipping IsHighlighted()
+
+        // Import block brakes to keep legacy behaviour
+        if (trackType == TrackElemType::blockBrakes)
+        {
+            dst.setBrakeBoosterSpeed(kRCT2DefaultBlockBrakeSpeed);
+        }
+        else if (trackTypeHasSpeedSetting(trackType))
+        {
+            dst.setBrakeBoosterSpeed(src.GetBrakeBoosterSpeed());
+        }
+        else if (trackType == TrackElemType::onRidePhoto)
+        {
+            dst.setPhotoTimeout(src.GetPhotoTimeout());
+        }
+
+        // This has to be done last, since the maze entry shares fields with the colour and sequence fields.
+        if (isMaze)
+        {
+            dst.setMazeEntry(src.GetMazeEntry());
+        }
+        else if (legacyRideType == RIDE_TYPE_GHOST_TRAIN)
+        {
+            dst.setDoorAState(src.GetDoorAState());
+            dst.setDoorBState(src.GetDoorBState());
+        }
+        else
+        {
+            dst.setSeatRotation(src.GetSeatRotation());
+        }
+
     }
 }

@@ -10,6 +10,7 @@
 #include "TileElement.h"
 #include "SurfaceElement.h"
 #include "PathElement.h"
+#include "TrackElement.h"
 #include "../MapLimits.h"
 #include "../../core/EnumUtils.hpp"
 #include "../../drawing/Colour.h"
@@ -457,5 +458,15 @@ namespace OpenRCT2
     {
         railingsIndex = newIndex;
         flags2.unset(FootpathElementFlag::isLegacyPathEntry);
+    }
+
+    const TrackElement* TileElementBase::asTrack() const
+    {
+        return as<TrackElement>();
+    }
+
+    TrackElement* TileElementBase::asTrack()
+    {
+        return as<TrackElement>();
     }
 }

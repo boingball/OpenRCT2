@@ -30,102 +30,6 @@
 
 using namespace OpenRCT2;
 
-RCT12::TrackElemType RCT12TrackElement::GetTrackType() const
-{
-    return TrackType;
-}
-
-uint8_t RCT12TrackElement::GetSequenceIndex() const
-{
-    return Sequence & RCT12_TRACK_ELEMENT_SEQUENCE_SEQUENCE_MASK;
-}
-
-uint8_t RCT12TrackElement::GetRideIndex() const
-{
-    return RideIndex;
-}
-
-RideColourScheme RCT12TrackElement::GetColourScheme() const
-{
-    return static_cast<RideColourScheme>(Colour & 0x3);
-}
-
-uint8_t RCT12TrackElement::GetStationIndex() const
-{
-    if (trackTypeIsStation(TrackType) || TrackType == RCT12::TrackElemType::towerBase)
-    {
-        return (Sequence & RCT12_TRACK_ELEMENT_SEQUENCE_STATION_INDEX_MASK) >> 4;
-    }
-    return 0;
-}
-
-bool RCT12TrackElement::HasChain() const
-{
-    return type & kRCT12TrackElementTypeFlagChainLift;
-}
-
-bool RCT12TrackElement::HasCableLift() const
-{
-    return Colour & RCT12_TRACK_ELEMENT_COLOUR_FLAG_CABLE_LIFT;
-}
-
-bool RCT12TrackElement::IsInverted() const
-{
-    return Colour & RCT12_TRACK_ELEMENT_COLOUR_FLAG_INVERTED;
-}
-
-uint8_t RCT12TrackElement::GetBrakeBoosterSpeed() const
-{
-    if (trackTypeHasSpeedSetting(TrackType))
-    {
-        return (Sequence >> 4) << 1;
-    }
-    return 0;
-}
-
-bool RCT12TrackElement::HasGreenLight() const
-{
-    if (trackTypeIsStation(TrackType))
-    {
-        return (Sequence & kRCT12TrackElementSequenceGreenLight) != 0;
-    }
-    return false;
-}
-
-uint8_t RCT12TrackElement::GetSeatRotation() const
-{
-    return Colour >> 4;
-}
-
-uint16_t RCT12TrackElement::GetMazeEntry() const
-{
-    return MazeEntry;
-}
-
-uint8_t RCT12TrackElement::GetPhotoTimeout() const
-{
-    if (TrackType == RCT12::TrackElemType::onRidePhoto)
-    {
-        return Sequence >> 4;
-    }
-    return 0;
-}
-
-uint8_t RCT12TrackElement::GetDoorAState() const
-{
-    return (Colour & RCT12_TRACK_ELEMENT_DOOR_A_MASK) >> 2;
-}
-
-uint8_t RCT12TrackElement::GetDoorBState() const
-{
-    return (Colour & RCT12_TRACK_ELEMENT_DOOR_B_MASK) >> 5;
-}
-
-bool RCT12TrackElement::IsIndestructible() const
-{
-    return (flags & RCT12_TILE_ELEMENT_FLAG_INDESTRUCTIBLE_TRACK_PIECE) != 0;
-}
-
 uint8_t RCT12SmallSceneryElement::GetEntryIndex() const
 {
     return this->EntryIndex;
@@ -304,11 +208,6 @@ uint8_t RCT12BannerElement::GetAllowedEdges() const
 bool IsUserStringID(StringId stringId)
 {
     return stringId >= 0x8000 && stringId < 0x9000;
-}
-
-bool RCT12TrackElement::BlockBrakeClosed() const
-{
-    return (flags & RCT12_TILE_ELEMENT_FLAG_BLOCK_BRAKE_CLOSED) != 0;
 }
 
 bool RCT12ResearchItem::IsInventedEndMarker() const
@@ -715,21 +614,4 @@ namespace OpenRCT2::RCT12
         return len;
     }
 
-    bool trackTypeHasSpeedSetting(TrackElemType trackType)
-    {
-        return trackType == TrackElemType::booster || trackType == TrackElemType::brakes;
-    }
-
-    bool trackTypeIsStation(TrackElemType trackType)
-    {
-        switch (trackType)
-        {
-            case TrackElemType::endStation:
-            case TrackElemType::beginStation:
-            case TrackElemType::middleStation:
-                return true;
-            default:
-                return false;
-        }
-    }
 } // namespace OpenRCT2::RCT12

@@ -1352,50 +1352,8 @@ namespace OpenRCT2::RCT2
                     auto oldTrackType = src2->GetTrackType();
                     TrackElemType trackType = RCT2TrackTypeToOpenRCT2(oldTrackType, rideType, IsFlatRide(src2->GetRideIndex()));
 
-                    dst2->setTrackType(trackType);
-                    dst2->setRideType(rideType);
-                    dst2->setSequenceIndex(src2->GetSequenceIndex());
-                    dst2->setRideIndex(RCT12RideIdToOpenRCT2RideId(src2->GetRideIndex()));
-                    dst2->setColourScheme(src2->GetColourScheme());
-                    dst2->setHasChain(src2->HasChain());
-                    dst2->setHasCableLift(src2->HasCableLift());
-                    dst2->setInverted(src2->IsInverted());
-                    dst2->setStationIndex(StationIndex::FromUnderlying(src2->GetStationIndex()));
-                    dst2->setHasGreenLight(src2->HasGreenLight());
-                    // Brakes import as closed to preserve legacy behaviour
-                    dst2->setBrakeClosed(src2->BlockBrakeClosed() || (trackType == TrackElemType::brakes));
-                    dst2->setIsIndestructible(src2->IsIndestructible());
-                    // Skipping IsHighlighted()
-
-                    // Import block brakes to keep legacy behaviour
-                    if (trackType == TrackElemType::blockBrakes)
-                    {
-                        dst2->setBrakeBoosterSpeed(kRCT2DefaultBlockBrakeSpeed);
-                    }
-                    else if (trackTypeHasSpeedSetting(trackType))
-                    {
-                        dst2->setBrakeBoosterSpeed(src2->GetBrakeBoosterSpeed());
-                    }
-                    else if (trackType == TrackElemType::onRidePhoto)
-                    {
-                        dst2->setPhotoTimeout(src2->GetPhotoTimeout());
-                    }
-
-                    // This has to be done last, since the maze entry shares fields with the colour and sequence fields.
-                    const auto& rtd = GetRideTypeDescriptor(rideType);
-                    if (rtd.specialType == RtdSpecialType::maze)
-                    {
-                        dst2->setMazeEntry(src2->GetMazeEntry());
-                    }
-                    else if (rideType == RIDE_TYPE_GHOST_TRAIN)
-                    {
-                        dst2->setDoorAState(src2->GetDoorAState());
-                        dst2->setDoorBState(src2->GetDoorBState());
-                    }
-                    else
-                    {
-                        dst2->setSeatRotation(src2->GetSeatRotation());
-                    }
+                    ImportS6TrackData(*dst2, *src2, trackType, rideType,
+                        GetRideTypeDescriptor(rideType).specialType == RtdSpecialType::maze);
 
                     if (TrackTypeMustBeMadeInvisible(*dst2))
                     {

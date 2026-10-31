@@ -1,4 +1,4 @@
-# OpenRCT2 Amiga core investigation — milestone 0.12
+# OpenRCT2 Amiga core investigation — milestone 0.13
 
 The 0.1 graphics runner has passed the user's WinUAE RTG test with original G1
 graphics. This milestone tackles the **actual engine**, starting with memory,
@@ -7,6 +7,56 @@ a real simulation benchmark on the host, and native C++ runtime probes.
 **There is no native Amiga park simulation executable yet.** The downloadable
 import executables below are diagnostics. The 0.8 viewer displays their
 terrain/path export through the existing RTG backend.
+
+## Actual partial Ride and TrackElement import (0.13)
+
+The importer now populates native GameState rides and native TrackElements in
+its actual tile vector/index, in addition to partial Guest storage. Selected
+ride fields include ID, legacy type, status, mode, overview location, station
+count and station start/entrance/exit coordinates, height, length, departure,
+queue metadata and segment length/time. Unloaded object indices remain null,
+as do all vehicle references. Ride types retain legacy IDs: object-dependent
+modern ride variants are not resolved yet. Station directions remain placeholders.
+
+The normal S6Importer and diagnostic share the exact track-field conversion.
+Pure track/station accessors move to data-only translation units. Legacy maze
+entry reads now convert their packed little-endian word explicitly; the host
+behaviour is unchanged. Unaligned maze transfer and station/chain/cable/
+inverted/brake/indestructible/green-light flags are tested on both architectures.
+
+Some legacy track IDs alias flat-ride, maze or wild-mouse pieces and require
+object-based classification. The diagnostic conservatively skips IDs 95,
+100, 101, 110, 111, 115, 116, 118, 119, 121, 122 and 123 in native storage,
+retaining their portable footprints. Missing ride references and invalid
+station indices are also skipped and counted. This is deliberately incomplete
+track import, not a claim of full legacy track compatibility.
+
+The busy fixture imports 134 partial rides and 8,870 native track elements;
+305 aliased pieces are deferred. It links 2,115 guest ride/station references,
+clears 67 unresolved guest references, retains 30 coherent station queue-head
+references and clears four unresolved heads. It retains 507 queue-path links
+and clears one unresolved queue-path ride/station reference. These counts
+reflect the partial guest set and selected-reference validation, not all game
+invariants. Invalid coordinates are cleared and counted. Small TestPark imports
+one partial ride and all 49 track elements, with no deferred aliases.
+
+Host and emulated 68060/no-FPU/64 MiB checks match canonical native ride/station
+fields and guest fingerprints as well as the expanded native tile fingerprint.
+Independent wire fixtures verify exact station coordinates/metadata, >16-bit
+segment lengths, queue/guest links and unresolved-reference clearing. Aliased
+tracks, invalid station indices and out-of-map station coordinates are tested
+separately. Host ASan/UBSan passes with LeakSanitizer disabled. The rebuilt host
+engine passes the 1,000-tick busy-park and 2,000-tick car-ride comparisons against
+the standard baseline, plus invalid-input rejection.
+
+The viewer remains 0.11. AMAP v3 payloads for the real parks are unchanged;
+the header's selected-state fingerprint changes because native tracks and
+cleared path references now enter that fingerprint. The separate ride/station
+fingerprint additionally includes imported guest ride/station references.
+This is not a whole-state checksum. No ride graphics, object loading, vehicles,
+scenery, complete guest import or native simulation is enabled. The new state
+must not be installed, ticked or saved as a complete park. Native 0.13 still
+needs real WinUAE/Amiga validation; the user's 0.12 WinUAE run completed PASS.
 
 ## Actual native Guest pool import (0.12)
 

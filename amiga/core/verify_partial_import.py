@@ -67,11 +67,24 @@ def main():
     # Classic protocol ride table offset after entities and list heads.
     ride_start = post + 46396
     for slot in range(255): saved[ride_start+slot*0x260]=255
-    for slot,kind,status,mode,stations in [(2,4,1,2,1),(7,43,2,4,0)]:
+    for slot,kind,status,mode,stations in [(2,4,1,2,3),(7,43,2,4,0)]:
         base=ride_start+slot*0x260
         saved[base]=kind;saved[base+1]=9;saved[base+4]=mode;saved[base+0x49]=status
         saved[base+0x50:base+0x52]=bytes([1,1] if slot==2 else [255,255])
         saved[base+0xc7]=stations
+        for i in range(4):
+            sx=(i+1)%4+1;sy=(i+2)%4+1
+            saved[base+0x52+i*2:base+0x54+i*2]=bytes([sx,sy])
+            saved[base+0x5a+i]=2+i;saved[base+0x5e+i]=3+i;saved[base+0x62+i]=0x80+i
+            saved[base+0x6a+i*2:base+0x6c+i*2]=bytes([sy,sx])
+            saved[base+0x72+i*2:base+0x74+i*2]=bytes([sx,sy])
+            struct.pack_into("<H",saved,base+0x7a+i*2,8 if slot==2 and i==1 else 3 if slot==2 and i==2 else 65535)
+            struct.pack_into("<i",saved,base+0xe4+i*4,300000+i)
+            struct.pack_into("<H",saved,base+0xf4+i*2,1000+i)
+            saved[base+0x1b8+i]=10+i
+            struct.pack_into("<H",saved,base+0x200+i*2,0x1234+i)
+    for slot,station in [(3,2),(8,1)]:
+        saved[4+slot*256+0x68]=2;saved[4+slot*256+0x69]=station
     for offset, fmt, value in [(5240, "H", 5), (1160, "H", 9), (2292, "H", 321),
                                (32, "i", 123450), (36, "i", 10000), (40, "I", 4),
                                (44, "h", 30), (46392, "I", 54321)]:
@@ -115,14 +128,24 @@ def main():
     unresolved_file = work / "unresolved-ride.sv6"
     unresolved_tiles=bytearray(tiles);unresolved_tiles[31]=99
     unresolved_file.write_bytes(envelope(saved,unresolved_tiles))
+    alias_file=work/"track-alias.sv6";alias_tiles=bytearray(tiles);alias_tiles[28]=95
+    alias_file.write_bytes(envelope(saved,alias_tiles))
+    station_file=work/"track-invalid-station.sv6";station_tiles=bytearray(tiles);station_tiles[29]=0xb3
+    station_file.write_bytes(envelope(saved,station_tiles))
+    coordinate_file=work/"station-invalid-coordinate.sv6"
+    coordinate_saved=bytearray(saved);coordinate_saved[ride_start+2*0x260+0x52+2*2]=250
+    coordinate_file.write_bytes(envelope(coordinate_saved))
     fixtures = [ROOT / "test/tests/testdata/parks/small_park_car_ride_one_car.sv6",
-                ROOT / "test/tests/testdata/parks/bpb.sv6", good, negative_file, unresolved_file]
+                ROOT / "test/tests/testdata/parks/bpb.sv6", good, negative_file, unresolved_file, alias_file, station_file, coordinate_file]
     expected = {
         fixtures[0].name: (15, 225, 24),
         "bpb.sv6": (128, 16384, 3400),
         good.name: (5, 25, 1),
         negative_file.name: (5, 25, 1),
         unresolved_file.name: (5,25,1),
+        alias_file.name: (5,25,1),
+        station_file.name: (5,25,1),
+        coordinate_file.name: (5,25,1),
     }
     platforms = [("host", [str(args.host.resolve())])]
     if args.native:
@@ -154,6 +177,10 @@ def main():
             assert run.returncode == 0 and "Partial GameState import: PASS" in run.stdout, run.stdout
             assert "Native path status/RideId union: PASS" in run.stdout, run.stdout
             assert "Actual entity pool: all slots / duplicate / bounds / reinitialisation / null bucket: PASS" in run.stdout
+            assert "Track field conversion / station flags / unaligned maze union: PASS" in run.stdout
+            ride_native=re.search(r"Actual native rides: (\d+); tracks: (\d+); ID/station/reference checks: PASS",run.stdout)
+            ride_fp=re.search(r"Native ride/station fields fingerprint: ([0-9a-f]{8})",run.stdout)
+            assert ride_native and ride_fp
             native_count=re.search(r"Actual native guests: (\d+); free slots: (\d+); sorted list / spatial membership: PASS",run.stdout)
             native_fp=re.search(r"Native guest fields fingerprint: ([0-9a-f]{8})",run.stdout)
             assert native_count and native_fp
@@ -176,8 +203,22 @@ def main():
             assert guests<=10000 and struct.unpack_from("<I",wire,28)[0]==rides
             guest_start=32+(cells+1)*4+count*8
             assert len(wire)==guest_start+guests*16+rides*8
-            if source in (good,negative_file,unresolved_file):
+            if source in (good,negative_file,unresolved_file,alias_file,station_file,coordinate_file):
                 assert guests==2
+                expected_rides_native=bytearray()
+                for slot,kind,status,mode,stations in [(2,4,1,2,3),(7,43,2,4,0)]:
+                    expected_rides_native+=struct.pack("<HHBBBHH",slot,kind,status,mode,stations,1 if slot==2 else 65535,1 if slot==2 else 65535)
+                    for i in range(4):
+                        sx=(i+1)%4+1;sy=(i+2)%4+1
+                        start_x=65535 if source==coordinate_file and slot==2 and i==2 else sx
+                        start_y=65535 if source==coordinate_file and slot==2 and i==2 else sy
+                        head=8 if slot==2 and i==1 else 3 if slot==2 and i==2 else 65535
+                        expected_rides_native+=struct.pack("<HHBBBBHiHHHHHH",start_x,start_y,2+i,3+i,0x80+i,10+i,0x1234+i,300000+i,1000+i,sy,sx,sx,sy,head)
+                for slot,station in [(3,2),(8,1)]:expected_rides_native+=struct.pack("<HHB",slot,2,station)
+                expected_ride_fp=2166136261
+                for byte in expected_rides_native:expected_ride_fp=((expected_ride_fp^byte)*16777619)&0xffffffff
+                assert ride_fp[1]==f"{expected_ride_fp:08x}",(ride_fp[1],f"{expected_ride_fp:08x}")
+                assert tuple(map(int,ride_native.groups()))==(2,0 if source in (unresolved_file,alias_file,station_file) else 1)
                 expected_native=bytearray()
                 for slot,x,y,z,direction,outside in [(3,76,78,16,24,0),(8,20,20,64,8,1)]:
                     expected_native+=struct.pack("<HiiiBBBBBBIBBBBBqqI",slot,x,y,z,direction,5,outside,21,7,15,
@@ -190,11 +231,16 @@ def main():
                     +struct.pack("<HHHhBBBBBBBB",3,76,78,16,24,5,0,21,7,15,0,0))
                 assert wire[guest_start:guest_start+guests*16]==expected_guests
                 assert tracks==(0 if source==unresolved_file else 1) and rides==2
+                skips=re.search(r"Native tracks skipped: aliases (\d+); missing rides (\d+); invalid stations (\d+)",run.stdout)
+                assert tuple(map(int,skips.groups()))==(int(source==alias_file),int(source==unresolved_file),int(source==station_file))
+                assert "Guest ride links: 2; unresolved 0; station guest links: 2; unresolved 0" in run.stdout
+                assert "Queue path ride/station links: 0; unresolved cleared: 1" in run.stdout
+                assert f"Invalid station coordinates cleared: {int(source==coordinate_file)}" in run.stdout
                 assert int(track_match[2])==(1 if source==unresolved_file else 0)
-                expected_rides=bytes([2,4,9,1,2,1,1,1,7,43,9,2,4,255,255,0])
+                expected_rides=bytes([2,4,9,1,2,1,1,3,7,43,9,2,4,255,255,0])
                 assert wire[guest_start+guests*16:]==expected_rides
                 records=wire[32+(cells+1)*4:guest_start]
-                assert [records[i:i+8] for i in range(0,len(records),8) if records[i]==2]==([] if source==unresolved_file else [bytes([2,6,0,2,2,0xa3,0xb2,2])])
+                assert [records[i:i+8] for i in range(0,len(records),8) if records[i]==2]==([] if source==unresolved_file else [bytes([2,6,0,2,95 if source==alias_file else 2,0xb3 if source==station_file else 0xa3,0xb2,2])])
 
                 assert "Saved guest snapshots: 2; skipped unplaced/invalid: 1" in run.stdout
 
@@ -205,7 +251,7 @@ def main():
             assert offsets[0] == 0 and offsets[-1] == count
             assert all(a < b for a,b in zip(offsets,offsets[1:]))
             assert int(native_count[1])==guests
-            result = {"native_guest_fingerprint":native_fp[1],"native_guests":int(native_count[1]),"ride_snapshots":rides,"track_footprints":tracks,"guest_snapshots":guests,"map_sha256": hashlib.sha256(wire).hexdigest(), "size": int(match[1]), "surfaces": int(match[3]), "paths": int(match[4]),
+            result = {"native_rides":int(ride_native[1]),"native_tracks":int(ride_native[2]),"native_ride_fingerprint":ride_fp[1],"native_guest_fingerprint":native_fp[1],"native_guests":int(native_count[1]),"ride_snapshots":rides,"track_footprints":tracks,"guest_snapshots":guests,"map_sha256": hashlib.sha256(wire).hexdigest(), "size": int(match[1]), "surfaces": int(match[3]), "paths": int(match[4]),
                       "fingerprint": fp[1], "overview_sha256": hashlib.sha256(overview.read_bytes()).hexdigest()}
             results[platform][source.name] = result
             if source == negative_file:

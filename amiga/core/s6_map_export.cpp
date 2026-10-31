@@ -28,6 +28,7 @@ void WritePartialS6Map(const PartialS6State& imported, const char* path)
                 uint8_t record[PARK_MAP_RECORD]{};
                 const auto& t = *tile++;
                 last = t.isLastForTile();
+                if(t.asTrack())continue; // footprints below preserve the portable legacy representation
                 record[0] = t.asPath() ? 1 : 0;
                 record[1] = t.baseHeight;
                 record[2] = t.flags & 0x30;
