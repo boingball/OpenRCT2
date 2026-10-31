@@ -56,6 +56,9 @@ def main():
         saved[base+0x2e]=kind
         saved[base+0x30]=21
         saved[base+0x31]=7
+        saved[base+0x38]=169;saved[base+0x3a]=201
+        saved[base+0x3e]=30;saved[base+0x3f]=40;saved[base+0x40]=50
+        struct.pack_into("<Iii",saved,base+0x9c,0x12340000+slot,300000+slot,-1234567-slot)
     saved_guest(3,76,78,16,24)
     saved_guest(8,20,20,64,8,outside=1)
     saved_guest(4,-32768,20,16,0)  # unplaced, skipped
@@ -98,6 +101,9 @@ def main():
         "bad-checksum.sv6": envelope(saved)[:-1] + bytes([envelope(saved)[-1] ^ 1]),
         "truncated.sv6": b"abc",
     }
+    wrong_guest_id=bytearray(saved)
+    struct.pack_into("<H",wrong_guest_id,4+3*256+0x0a,8)
+    bad["guest-id-mismatch.sv6"]=envelope(wrong_guest_id)
     for name, data in bad.items():
         (work / name).write_bytes(data)
     negative = bytearray(saved)
@@ -147,6 +153,11 @@ def main():
                 continue
             assert run.returncode == 0 and "Partial GameState import: PASS" in run.stdout, run.stdout
             assert "Native path status/RideId union: PASS" in run.stdout, run.stdout
+            assert "Actual entity pool: all slots / duplicate / bounds / reinitialisation / null bucket: PASS" in run.stdout
+            native_count=re.search(r"Actual native guests: (\d+); free slots: (\d+); sorted list / spatial membership: PASS",run.stdout)
+            native_fp=re.search(r"Native guest fields fingerprint: ([0-9a-f]{8})",run.stdout)
+            assert native_count and native_fp
+            assert int(native_count[1])+int(native_count[2])==10000
             match = re.search(r"Map: (\d+) x (\d+); surfaces: (\d+); paths: (\d+)", run.stdout)
             assert match, run.stdout
             assert tuple(map(int, (match[1], match[3], match[4]))) == expected[source.name], run.stdout
@@ -167,6 +178,14 @@ def main():
             assert len(wire)==guest_start+guests*16+rides*8
             if source in (good,negative_file,unresolved_file):
                 assert guests==2
+                expected_native=bytearray()
+                for slot,x,y,z,direction,outside in [(3,76,78,16,24,0),(8,20,20,64,8,1)]:
+                    expected_native+=struct.pack("<HiiiBBBBBBIBBBBBqqI",slot,x,y,z,direction,5,outside,21,7,15,
+                        0x12340000+slot,169,201,30,40,50,300000+slot,-1234567-slot,(x//32)*256+y//32)
+                expected_fp=2166136261
+                for byte in expected_native:expected_fp=((expected_fp^byte)*16777619)&0xffffffff
+                assert native_fp[1]==f"{expected_fp:08x}",(native_fp[1],f"{expected_fp:08x}")
+
                 expected_guests=(struct.pack("<HHHhBBBBBBBB",8,20,20,64,8,5,1,21,7,15,0,0)
                     +struct.pack("<HHHhBBBBBBBB",3,76,78,16,24,5,0,21,7,15,0,0))
                 assert wire[guest_start:guest_start+guests*16]==expected_guests
@@ -185,7 +204,8 @@ def main():
             offsets = struct.unpack_from("<" + "I"*(cells+1), wire, 32)
             assert offsets[0] == 0 and offsets[-1] == count
             assert all(a < b for a,b in zip(offsets,offsets[1:]))
-            result = {"ride_snapshots":rides,"track_footprints":tracks,"guest_snapshots":guests,"map_sha256": hashlib.sha256(wire).hexdigest(), "size": int(match[1]), "surfaces": int(match[3]), "paths": int(match[4]),
+            assert int(native_count[1])==guests
+            result = {"native_guest_fingerprint":native_fp[1],"native_guests":int(native_count[1]),"ride_snapshots":rides,"track_footprints":tracks,"guest_snapshots":guests,"map_sha256": hashlib.sha256(wire).hexdigest(), "size": int(match[1]), "surfaces": int(match[3]), "paths": int(match[4]),
                       "fingerprint": fp[1], "overview_sha256": hashlib.sha256(overview.read_bytes()).hexdigest()}
             results[platform][source.name] = result
             if source == negative_file:

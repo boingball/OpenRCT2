@@ -9,6 +9,10 @@ namespace OpenRCT2::Guard
     {
         if (!expression) throw std::runtime_error("Engine stream invariant failed");
     }
+    void Assert(bool expression, const char*, ...)
+    {
+        if (!expression) throw std::runtime_error("Engine diagnostic invariant failed");
+    }
     void Assert_VA(bool expression, const char*, va_list)
     {
         if (!expression) throw std::runtime_error("Engine stream allocation failed");

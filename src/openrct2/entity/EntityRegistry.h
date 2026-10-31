@@ -134,6 +134,8 @@ namespace OpenRCT2
         const std::list<EntityId>& getEntityList(EntityType id);
         uint16_t getMiscEntityCount();
 
+        // Fresh empty registries only; never replaces populated-state cleanup.
+        void initialiseEmptyStorage();
         void resetAllEntities();
         void resetEntitySpatialIndices();
 

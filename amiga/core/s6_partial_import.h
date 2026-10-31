@@ -8,8 +8,6 @@
 #include <string>
 #include <vector>
 
-// A deliberately isolated partial state. Never install it as the active
-// game state: objects, rides, entities and other simulation data are absent.
 struct SavedGuestSnapshot
 {
     uint16_t slot, x, y;
@@ -23,6 +21,9 @@ struct SavedTrackSnapshot
     std::array<uint8_t, 8> record;
 };
 
+// A deliberately isolated partial state. Never install it as the active
+// game state: guest fields are partial; objects, rides, vehicles and staff
+// and other required simulation data are absent.
 struct PartialS6State
 {
     std::unique_ptr<OpenRCT2::GameState_t> state;
@@ -32,7 +33,8 @@ struct PartialS6State
     uint32_t paths = 0;
     uint32_t omittedElements = 0;
     std::string scenarioLabel;
-    // View-only saved positions, separate from the native EntityRegistry.
+    // Portable viewer snapshots; the native registry also holds selected guest
+    // fields after milestone 0.12. Neither representation is tickable.
     std::vector<SavedGuestSnapshot> savedGuests;
     uint32_t skippedGuestSnapshots = 0;
     std::vector<SavedTrackSnapshot> savedTracks;

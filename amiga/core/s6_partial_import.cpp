@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 #include "s6_partial_import.h"
+#include <openrct2/entity/Guest.h>
 #include <openrct2/core/Endianness.h>
 #include <openrct2/core/MemoryStream.h>
 #include <openrct2/core/Numerics.hpp>
@@ -97,6 +98,8 @@ PartialS6State ImportS6TerrainAndMetadata(const char* path)
     check(MemoryProfile::mapFits(mapSize, mapSize), "SV6 map exceeds the small-memory map limit");
     PartialS6State result;
     result.state = std::make_unique<GameState_t>();
+    result.state->entities.initialiseEmptyStorage();
+    static_assert(sizeof(Guest) <= sizeof(Entity_t));
     auto& state = *result.state;
     state.mapSize = { mapSize, mapSize };
     const auto* dateBytes = static_cast<const uint8_t*>(date->GetData());
@@ -225,6 +228,31 @@ PartialS6State ImportS6TerrainAndMetadata(const char* path)
             ++result.skippedGuestSnapshots;
             continue;
         }
+        // Create a real Guest in the engine's pool at its legacy slot. Only
+        // selected endian-safe fields are populated: this is still not tickable.
+        check(ReadLittleEndian<uint16_t>(p+offsetof(RCT2::Peep, EntityIndex))==slot, "Guest ID differs from legacy slot");
+        auto* guestBase = result.state->entities.createEntityAt(EntityId::FromUnderlying(slot), EntityType::guest);
+        check(guestBase != nullptr, "Native guest slot allocation failed");
+        auto* guest = reinterpret_cast<Guest*>(guestBase);
+        guest->currentRide=RideId::GetNull();
+        guest->interactionRideIndex=RideId::GetNull();
+        guest->guestHeadingToRideId=RideId::GetNull();
+        guest->guestNextInQueue=EntityId::GetNull();
+        guest->x=x;guest->y=y;guest->z=z;guest->orientation=direction;
+        guest->state=static_cast<PeepState>(peepState);
+        guest->outsideOfPark=outside!=0;
+        guest->animationObjectIndex=kObjectEntryIndexNull;
+        guest->animationGroup=static_cast<PeepAnimationGroup>(p[offsetof(RCT2::Peep, AnimationGroup)]);
+        guest->tShirtColour=static_cast<Drawing::Colour>(shirt);
+        guest->trousersColour=static_cast<Drawing::Colour>(trousers);
+        guest->energy=p[offsetof(RCT2::Peep, Energy)];
+        guest->happiness=p[offsetof(RCT2::Peep, Happiness)];
+        guest->hunger=p[offsetof(RCT2::Peep, Hunger)];
+        guest->thirst=p[offsetof(RCT2::Peep, Thirst)];
+        guest->toilet=p[offsetof(RCT2::Peep, Toilet)];
+        guest->peepId=ReadLittleEndian<uint32_t>(p+offsetof(RCT2::Peep, Id));
+        guest->cashInPocket=ReadLittleEndian<int32_t>(p+offsetof(RCT2::Peep, CashInPocket));
+        guest->cashSpent=ReadLittleEndian<int32_t>(p+offsetof(RCT2::Peep, CashSpent));
         result.savedGuests.push_back({ static_cast<uint16_t>(slot), static_cast<uint16_t>(x),
             static_cast<uint16_t>(y), z, direction, peepState, outside, shirt, trousers,
             p[offsetof(RCT2::Peep, AnimationGroup)] });
@@ -236,6 +264,7 @@ PartialS6State ImportS6TerrainAndMetadata(const char* path)
         if (a.x + a.y != b.x + b.y) return a.x + a.y < b.x + b.y;
         return a.slot < b.slot;
     });
+    result.state->entities.resetEntitySpatialIndices();
     result.tileIndex = std::make_unique<TilePointerIndex<TileElement>>(
         RCT2::Limits::kMaxMapSize, state.tileElements.data(), state.tileElements.size());
     return result;

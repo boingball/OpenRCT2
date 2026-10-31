@@ -8,6 +8,7 @@
  *****************************************************************************/
 
 #include "EntityRegistry.h"
+#include "EntitySpatialIndex.hpp"
 
 #include "../Diagnostic.h"
 #include "../GameState.h"
@@ -38,21 +39,6 @@ namespace OpenRCT2
 {
     using namespace OpenRCT2::Core;
 
-    static constexpr uint32_t ComputeSpatialIndex(const CoordsXY& loc)
-    {
-        if (loc.isNull())
-            return kSpatialIndexNullBucket;
-
-        // NOTE: The input coordinate is rotated and can have negative components.
-        const auto tileX = std::abs(loc.x) / kCoordsXYStep;
-        const auto tileY = std::abs(loc.y) / kCoordsXYStep;
-
-        if (tileX >= kMaximumMapSizeTechnical || tileY >= kMaximumMapSizeTechnical)
-            return kSpatialIndexNullBucket;
-
-        return tileX * kMaximumMapSizeTechnical + tileY;
-    }
-
     static constexpr uint32_t GetSpatialIndex(EntityBase& entity)
     {
         return entity.spatialIndex & ~kSpatialIndexDirtyMask;
@@ -77,68 +63,9 @@ namespace OpenRCT2
         }
     }
 
-    // TODO: make part of EntityList unit?
-    uint16_t EntityRegistry::getEntityListCount(EntityType type)
-    {
-        return static_cast<uint16_t>(_entityLists[EnumValue(type)].size());
-    }
-
-    // TODO: make part of EntityList unit?
-    uint16_t EntityRegistry::getNumFreeEntities()
-    {
-        return static_cast<uint16_t>(_freeIdList.size());
-    }
-
     std::string EntitiesChecksum::toString() const
     {
         return String::StringFromHex(raw);
-    }
-
-    EntityBase* EntityRegistry::tryGetEntity(EntityId entityIndex)
-    {
-        const auto idx = entityIndex.ToUnderlying();
-        return idx >= kMaxEntities ? nullptr : &entities[idx].base;
-    }
-
-    EntityBase* EntityRegistry::getEntity(EntityId entityIndex)
-    {
-        if (entityIndex.IsNull())
-        {
-            return nullptr;
-        }
-        Guard::Assert(entityIndex.ToUnderlying() < kMaxEntities, "Tried getting entity %u", entityIndex.ToUnderlying());
-        return tryGetEntity(entityIndex);
-    }
-
-    const std::vector<EntityId>& EntityRegistry::getEntityTileList(const CoordsXY& spritePos)
-    {
-        return _entitySpatialIndex[ComputeSpatialIndex(spritePos)];
-    }
-
-    void EntityRegistry::resetEntityLists()
-    {
-        for (auto& list : _entityLists)
-        {
-            list.clear();
-        }
-    }
-
-    void EntityRegistry::resetFreeIds()
-    {
-        _freeIdList.clear();
-        _freeIdList.resize(kMaxEntities);
-
-        // List needs to be back to front to simplify removing
-        auto nextId = 0;
-        std::for_each(std::rbegin(_freeIdList), std::rend(_freeIdList), [&](auto& elem) {
-            elem = EntityId::FromUnderlying(nextId);
-            nextId++;
-        });
-    }
-
-    const std::list<EntityId>& EntityRegistry::getEntityList(const EntityType id)
-    {
-        return _entityLists[EnumValue(id)];
     }
 
     /**
@@ -178,28 +105,6 @@ namespace OpenRCT2
         resetEntitySpatialIndices();
     }
 
-    /**
-     *
-     *  rct2: 0x0069EBE4
-     * This function looks as though it sets some sort of order for sprites.
-     * Sprites can share their position if this is the case.
-     */
-    void EntityRegistry::resetEntitySpatialIndices()
-    {
-        for (auto& vec : _entitySpatialIndex)
-        {
-            vec.clear();
-        }
-        for (EntityId::UnderlyingType i = 0; i < kMaxEntities; i++)
-        {
-            auto* entity = getEntity(EntityId::FromUnderlying(i));
-            if (entity != nullptr && entity->type != EntityType::null)
-            {
-                entitySpatialInsert(*entity, { entity->x, entity->y });
-            }
-        }
-    }
-
 #ifndef DISABLE_NETWORK
     EntitiesChecksum EntityRegistry::getAllEntitiesChecksum()
     {
@@ -217,27 +122,6 @@ namespace OpenRCT2
         return EntitiesChecksum{};
     }
 #endif // DISABLE_NETWORK
-
-    void EntityRegistry::entityReset(EntityBase& entity)
-    {
-        // Need to retain how the sprite is linked in lists
-        auto entityIndex = entity.id;
-        _entityFlashingList[entityIndex.ToUnderlying()] = false;
-
-        Entity_t* tempEntity = reinterpret_cast<Entity_t*>(&entity);
-        *tempEntity = Entity_t();
-
-        entity.id = entityIndex;
-        entity.type = EntityType::null;
-    }
-
-    void EntityRegistry::addToEntityList(EntityBase& entity)
-    {
-        auto& list = _entityLists[EnumValue(entity.type)];
-
-        // Entity list is sorted by id to prevent desyncs.
-        Algorithm::sortedInsert(list, entity.id);
-    }
 
     void EntityRegistry::addToFreeList(EntityId index)
     {
@@ -265,27 +149,6 @@ namespace OpenRCT2
             count += getEntityListCount(id);
         }
         return count;
-    }
-
-    void EntityRegistry::prepareNewEntity(EntityBase& base, const EntityType type)
-    {
-        // Need to reset all sprite data, as the uninitialised values
-        // may contain garbage and cause a desync later on.
-        entityReset(base);
-
-        base.type = type;
-        addToEntityList(base);
-
-        base.x = kLocationNull;
-        base.y = kLocationNull;
-        base.z = 0;
-        base.spriteData.width = 0x10;
-        base.spriteData.heightMin = 0x14;
-        base.spriteData.heightMax = 0x8;
-        base.spriteData.spriteRect = {};
-        base.spatialIndex = kInvalidSpatialIndex;
-
-        entitySpatialInsert(base, { kLocationNull, 0 });
     }
 
     EntityBase* EntityRegistry::createEntity(EntityType type)
@@ -323,26 +186,6 @@ namespace OpenRCT2
         return entity;
     }
 
-    EntityBase* EntityRegistry::createEntityAt(const EntityId index, const EntityType type)
-    {
-        auto id = Algorithm::binaryFind(std::rbegin(_freeIdList), std::rend(_freeIdList), index);
-        if (id == std::rend(_freeIdList))
-        {
-            return nullptr;
-        }
-
-        auto* entity = getEntity(index);
-        if (entity == nullptr)
-        {
-            return nullptr;
-        }
-
-        _freeIdList.erase(std::next(id).base());
-
-        prepareNewEntity(*entity, type);
-        return entity;
-    }
-
     /**
      *
      *  rct2: 0x00672AA4
@@ -359,18 +202,6 @@ namespace OpenRCT2
     void EntityRegistry::updateMoneyEffect()
     {
         miscUpdateAllTypes<MoneyEffect>();
-    }
-
-    // Performs a search to ensure that insert keeps next_in_quadrant in sprite_index order
-    void EntityRegistry::entitySpatialInsert(EntityBase& entity, const CoordsXY& newLoc)
-    {
-        const auto newIndex = ComputeSpatialIndex(newLoc);
-
-        auto& spatialVector = _entitySpatialIndex[newIndex];
-
-        Algorithm::sortedInsert(spatialVector, entity.id);
-
-        entity.spatialIndex = newIndex;
     }
 
     void EntityRegistry::entitySpatialRemove(EntityBase& entity)

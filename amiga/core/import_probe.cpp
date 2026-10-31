@@ -3,6 +3,8 @@
 #include "s6_partial_import.h"
 #include <openrct2/world/tile_element/PathElement.h>
 #include <cstring>
+#include <algorithm>
+#include <openrct2/entity/Guest.h>
 #include <stdexcept>
 
 #ifdef __amigaos__
@@ -46,6 +48,70 @@ static void testPathUnion()
     print("Native path status/RideId union: PASS\n");
 }
 
+static void testNativeEntityPool()
+{
+    using namespace OpenRCT2;
+    auto registry=std::make_unique<EntityRegistry>();
+    registry->initialiseEmptyStorage();
+    if (registry->getNumFreeEntities()!=kMaxEntities || registry->tryGetEntity(EntityId::FromUnderlying(kMaxEntities)))
+        throw std::runtime_error("Entity pool initial bounds failed");
+    for (uint16_t i=0;i<kMaxEntities;i++)
+    {
+        auto* entity=registry->createEntityAt(EntityId::FromUnderlying(i),EntityType::guest);
+        if (!entity || entity->id.ToUnderlying()!=i || entity->type!=EntityType::guest)
+            throw std::runtime_error("Entity pool allocation failed");
+    }
+    if (registry->getNumFreeEntities()!=0 || registry->getEntityListCount(EntityType::guest)!=kMaxEntities
+        || registry->createEntityAt(EntityId::FromUnderlying(kMaxEntities-1),EntityType::guest)
+        || registry->createEntityAt(EntityId::FromUnderlying(kMaxEntities),EntityType::guest))
+        throw std::runtime_error("Entity pool duplicate/capacity checks failed");
+    bool rejected=false;
+    try { registry->initialiseEmptyStorage(); } catch (const std::exception&) { rejected=true; }
+    if (!rejected || registry->getEntityTileList({kLocationNull,0}).size()!=kMaxEntities)
+        throw std::runtime_error("Entity pool reinitialisation/null bucket failed");
+    registry->resetEntitySpatialIndices();
+    if (registry->getEntityTileList({kLocationNull,0}).size()!=kMaxEntities)
+        throw std::runtime_error("Entity null bucket rebuild failed");
+    print("Actual entity pool: all slots / duplicate / bounds / reinitialisation / null bucket: PASS\n");
+}
+
+static uint32_t checkNativeGuests(PartialS6State& imported)
+{
+    using namespace OpenRCT2;
+    auto& registry=imported.state->entities;
+    const auto count=imported.savedGuests.size();
+    if (registry.getEntityListCount(EntityType::guest)!=count || registry.getNumFreeEntities()+count!=kMaxEntities)
+        throw std::runtime_error("Imported guest entity/free counts differ");
+    uint32_t hash=2166136261u;
+    auto append=[&](uint64_t value,unsigned width){while(width--){hash=(hash^(value&255))*16777619u;value>>=8;}};
+    uint16_t previous=0;bool first=true;
+    for (auto id:registry.getEntityList(EntityType::guest))
+    {
+        auto* base=registry.getEntity(id);
+        auto* guest=reinterpret_cast<Guest*>(base);
+        if (!base || base->type!=EntityType::guest || (!first && id.ToUnderlying()<=previous))
+            throw std::runtime_error("Guest type/ID/list order failed");
+        previous=id.ToUnderlying();first=false;
+        const auto& bucket=registry.getEntityTileList({guest->x,guest->y});
+        const uint32_t spatial=(guest->x/32)*kMaximumMapSizeTechnical+guest->y/32;
+        if (guest->spatialIndex!=spatial || std::count(bucket.begin(),bucket.end(),id)!=1)
+            throw std::runtime_error("Guest spatial index membership failed");
+        append(id.ToUnderlying(),2);append(guest->x,4);append(guest->y,4);append(guest->z,4);
+        append(guest->orientation,1);append(static_cast<uint8_t>(guest->state),1);append(guest->outsideOfPark,1);
+        append(static_cast<uint8_t>(guest->tShirtColour),1);append(static_cast<uint8_t>(guest->trousersColour),1);
+        append(static_cast<uint8_t>(guest->animationGroup),1);append(guest->peepId,4);
+        append(guest->energy,1);append(guest->happiness,1);append(guest->hunger,1);append(guest->thirst,1);append(guest->toilet,1);
+        append(guest->cashInPocket,8);append(guest->cashSpent,8);append(guest->spatialIndex,4);
+        if (registry.createEntityAt(id,EntityType::guest))throw std::runtime_error("Duplicate imported ID accepted");
+    }
+    if (!registry.getEntityTileList({kLocationNull,0}).empty())
+        throw std::runtime_error("Placed guest left in null spatial bucket");
+    print("Actual Guest structure bytes: %lu\n",static_cast<unsigned long>(sizeof(Guest)));
+    print("Actual native guests: %lu; free slots: %u; sorted list / spatial membership: PASS\n",
+        static_cast<unsigned long>(count),unsigned(registry.getNumFreeEntities()));
+    return hash;
+}
+
 int main(int argc, char** argv)
 {
     // Fixed output names never share the required .sv6 input extension.
@@ -63,14 +129,17 @@ int main(int argc, char** argv)
         return 20;
     }
     report = std::fopen("OpenRCT2ImportProbe.txt", "w");
-    print("OpenRCT2 partial native GameState import 0.10\n");
+    print("OpenRCT2 partial native GameState import 0.12\n");
     print("Terrain/paths, metadata, guest and ride/track snapshots; no simulation.\n");
     int result = 0;
     try
     {
         testPathUnion();
+        testNativeEntityPool();
         print("Reading and importing SV6...\n");
         auto imported = ImportS6TerrainAndMetadata(argv[1]);
+        const auto nativeGuestFingerprint=checkNativeGuests(imported);
+        print("Native guest fields fingerprint: %08lx\n",static_cast<unsigned long>(nativeGuestFingerprint));
         const auto& state = *imported.state;
         print("Constructed actual GameState: %lu bytes\n", static_cast<unsigned long>(sizeof(state)));
         print("Map: %u x %u; surfaces: %lu; paths: %lu\n",
@@ -104,7 +173,7 @@ int main(int argc, char** argv)
         print("RTG viewer map: ImportedMap.amap\n");
         print("Terrain/path overview: ImportedMap.ppm\n");
         print("Partial GameState import: PASS\n");
-        print("Objects, rides and entities are NOT imported. This state cannot run simulation.\n");
+        print("Guest import is partial; objects, rides, vehicles and staff are absent. No simulation.\n");
     }
     catch (const std::exception& error)
     {

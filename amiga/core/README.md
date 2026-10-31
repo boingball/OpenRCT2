@@ -1,4 +1,4 @@
-# OpenRCT2 Amiga core investigation — milestone 0.11
+# OpenRCT2 Amiga core investigation — milestone 0.12
 
 The 0.1 graphics runner has passed the user's WinUAE RTG test with original G1
 graphics. This milestone tackles the **actual engine**, starting with memory,
@@ -7,6 +7,51 @@ a real simulation benchmark on the host, and native C++ runtime probes.
 **There is no native Amiga park simulation executable yet.** The downloadable
 import executables below are diagnostics. The 0.8 viewer displays their
 terrain/path export through the existing RTG backend.
+
+## Actual native Guest pool import (0.12)
+
+The importer now allocates real Guest storage in the actual EntityRegistry at
+validated legacy slots, with its real sorted entity list, free-ID list and
+spatial buckets. It populates selected fields with explicit little-endian
+reads: coordinates/direction, state, outside flag, animation group, clothing,
+peep ID, energy/happiness/hunger/thirst/toilet and signed 32-bit money fields
+converted to the native money64 members. Missing ride/queue references are
+set null, and animation objects remain unresolved. Names are not allocated.
+The guest's stored legacy EntityIndex must match its array slot or import is
+rejected. The portable AMAP snapshot remains unchanged.
+
+This is still a **partial guest import, not native park simulation**. Rides,
+vehicles, staff, names, histories, paths/goals, inventories and most guest
+state are not reconstructed. Do not tick, install or save this isolated state
+as a complete park. The viewer remains the verified 0.11 executable; this
+milestone changes the import diagnostic rather than adding new graphics.
+
+Fourteen data-only EntityRegistry method bodies are moved verbatim to
+EntityRegistryData.cpp, sharing the actual allocator/list/spatial operations
+with the normal engine. Entity movement and registry insertion use the same
+small spatial-bucket helper. initialiseEmptyStorage is a guarded entry point
+for freshly constructed empty registries only; resetAllEntities remains the
+populated-state cleanup path and retains attached-name/history cleanup.
+
+The native probe fills every one of the 10,000 slots, checks duplicate and
+out-of-range allocation, rejects reinitialisation, and rebuilds the null
+spatial bucket. Imported guests are checked against free/list counts, sorted
+IDs and actual tile membership. A separate canonical guest fingerprint covers
+the selected native Guest members and spatial indices; it does not claim
+whole-guest equivalence. Independent packed wire fixtures verify exact values,
+including money beyond 16-bit range and negative money. Staff/null-position
+records remain excluded and invalid stored IDs are explicitly rejected.
+
+The busy park loads 2,189 actual partial guests and leaves 7,811 slots free.
+The GameState allocation remains 9,722,842 bytes on m68k; list/bucket allocations
+are additional. Host/68060 comparison runs with 64 MiB and no FPU, and host
+ASan/UBSan checks use LeakSanitizer disabled in this environment. Actual Amiga
+or WinUAE validation of the new import path remains outstanding.
+
+After this extraction, the rebuilt actual small-profile host engine also
+passes the 1,000-tick busy-park and 2,000-tick car-ride comparisons against the
+standard-profile baseline, plus oversized-map and invalid-tick rejection.
+This validates the shared code on its supported host, not native simulation.
 
 ## Optional saved-guest sprite view (0.11)
 
