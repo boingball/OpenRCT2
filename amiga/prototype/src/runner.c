@@ -125,7 +125,7 @@ void runner_input(Runner *r, int key) {
         case KEY_VIEW: r->atlas = !r->atlas; break;
         case KEY_PREV: if (r->map.side&&!r->atlas) {if(r->map_zoom<3){r->map_zoom++;r->pan_x/=2;r->pan_y/=2;}break;} if (r->page > 0) r->page--; break;
         case KEY_NEXT: if (r->map.side&&!r->atlas) {if(r->map_zoom>0){r->map_zoom--;r->pan_x*=2;r->pan_y*=2;}break;} if ((uint32_t)(r->page + 1) * 12u < r->g1.count) r->page++; break;
-        case KEY_PAUSE: r->paused = !r->paused; break;
+        case KEY_PAUSE: if(r->map.side)r->map_guests_visible=!r->map_guests_visible;else r->paused = !r->paused; break;
         case KEY_HOME: r->pan_x = r->pan_y = r->page = 0; break;
         case KEY_MORE: if (r->guests < 1024) r->guests *= 2; break;
         case KEY_LESS: if (r->guests > 16) r->guests /= 2; break;
@@ -265,8 +265,8 @@ static void hud(Runner *r) {
     runner_fill(c, 0, 0, c->width, 48, 1);
     runner_fill(c, 0, c->height - 48, c->width, 48, 1);
     runner_fill(c, 0, 46, c->width, 2, 4);
-    runner_text(c, 8, 6, r->map.side ? "OPENRCT2 / IMPORTED PARK VIEW 0.8" : c->width > 320 ? "OPENRCT2 / AMIGA GRAPHICS RUNNER 0.1" : "OPENRCT2 / AMIGA RUNNER 0.1", 3);
-    if(r->map.side&&!r->atlas){p=word(p,"MAP ");p=number(p,r->map.side);p=word(p," X ");p=number(p,r->map.side);}
+    runner_text(c, 8, 6, r->map.side ? "OPENRCT2 / IMPORTED PARK VIEW 0.9" : c->width > 320 ? "OPENRCT2 / AMIGA GRAPHICS RUNNER 0.1" : "OPENRCT2 / AMIGA RUNNER 0.1", 3);
+    if(r->map.side&&!r->atlas){p=word(p,"MAP ");p=number(p,r->map.side);p=word(p," GUESTS ");p=number(p,r->map_guests_visible?r->map.guest_count:0);}
     else {p = word(p, r->atlas ? "SPRITES " : "CROWD "); p = number(p, r->atlas ? (uint32_t)r->page : (uint32_t)r->guests);}
     p = word(p, "  FPS "); p = number(p, (unsigned)r->fps10 / 10u); *p++ = '.'; *p++ = (char)('0' + r->fps10 % 10); *p = 0;
     if (c->width > 320) {
@@ -274,9 +274,9 @@ static void hud(Runner *r) {
         p = word(p, "MS  COPY "); p = number(p, (unsigned)r->last_present_ms); word(p, "MS");
     }
     runner_text(c, 8, 24, line, 4);
-    runner_text(c, 8, c->height - 40, r->map.side ? "ARROWS PAN  [ ] ZOOM  HOME CENTRE  G GRID  ESC QUIT" : c->width > 320 ? "ARROWS PAN  TAB VIEW  [ ] PAGE  +/- CROWD  SPACE PAUSE  ESC QUIT" : "ARROWS PAN  TAB VIEW  ESC QUIT", 3);
-    runner_text(c, 8, c->height - 24, r->map.side ? "SAVED TERRAIN / PATHS - NO PARK SIMULATION" : c->width > 320 ? "B BENCHMARK  HOME RESET  G GRID / GRAPHICS TEST - NO PARK SIMULATION" : "+/- CROWD  B BENCHMARK  [ ] PAGE", 5);
-    if (r->map.side) runner_text(c,8,c->height-10,"RIDES / SCENERY / GUESTS OMITTED",4);
+    runner_text(c, 8, c->height - 40, r->map.side ? (c->width>320?"ARROWS PAN  [ ] ZOOM  HOME CENTRE  SPACE GUESTS  ESC QUIT":"ARROWS PAN  [ ] ZOOM  SPACE GUESTS  ESC") : c->width > 320 ? "ARROWS PAN  TAB VIEW  [ ] PAGE  +/- CROWD  SPACE PAUSE  ESC QUIT" : "ARROWS PAN  TAB VIEW  ESC QUIT", 3);
+    runner_text(c, 8, c->height - 24, r->map.side ? "SAVED MAP / STATIC GUEST SNAPSHOT - NO SIMULATION" : c->width > 320 ? "B BENCHMARK  HOME RESET  G GRID / GRAPHICS TEST - NO PARK SIMULATION" : "+/- CROWD  B BENCHMARK  [ ] PAGE", 5);
+    if (r->map.side) runner_text(c,8,c->height-10,"DIAGNOSTIC GUEST MARKERS / RIDES AND SCENERY OMITTED",4);
     else if (r->diagnostic) runner_text(c, 8, c->height - 10, "DIAGNOSTIC / NO RCT2 DATA", 4);
     else runner_text(c, 8, c->height - 10, "ORIGINAL G1 SPRITES / SCRIPTED CROWD", 4);
     runner_mark(r, (Rect){0, 0, c->width, 48});
@@ -334,10 +334,11 @@ static uint32_t milliseconds(uint32_t ticks, uint32_t hz) {
 }
 static void report(Runner *r, uint32_t hz, uint32_t ticks, unsigned frames) {
     char text[512], *p = text;
-    p = word(p, r->map.side ? "OpenRCT2 imported park viewer 0.8\nView-only terrain/path benchmark; no park simulation.\nResolution: " : "OpenRCT2 Amiga graphics runner 0.1\nGraphics benchmark only; no OpenRCT2 simulation.\nResolution: ");
+    p = word(p, r->map.side ? "OpenRCT2 imported park viewer 0.9\nView-only terrain/path benchmark; no park simulation.\nResolution: " : "OpenRCT2 Amiga graphics runner 0.1\nGraphics benchmark only; no OpenRCT2 simulation.\nResolution: ");
     p = number(p, (unsigned)r->canvas.width); p = word(p, " x "); p = number(p, (unsigned)r->canvas.height);
     p = word(p, "\nSprites: "); p = number(p, r->g1.count);
     p = word(p, r->map.side ? "\nImported map elements: " : "\nScripted visitors: "); p = number(p, r->map.side ? r->map.elements : (unsigned)r->guests);
+    if(r->map.side){p=word(p,"\nSaved guest snapshots: ");p=number(p,r->map.guest_count);}
     p = word(p, "\nFrames: "); p = number(p, frames);
     p = word(p, "\nElapsed ms: "); p = number(p, milliseconds(ticks, hz));
     p = word(p, "\nFPS x10: ");
@@ -383,7 +384,7 @@ int runner_main(void) {
         if(!platform_load(o->map_path,&map_file,&map_size) || !runner_set_map(&state,map_file,map_size)) {
             platform_log("Cannot load imported MAP (missing, corrupt, or unsupported version).\n");goto cleanup;
         }
-        platform_log("Imported terrain/path viewer loaded. No rides, guests or simulation.\n");
+        platform_log("Imported map/guest snapshot loaded. No rides or simulation.\n");
     }
     if (!platform_open(o)) goto cleanup;
     g1_palette(&state.g1, rgb); if(state.map.side){rgb[2]=0x267db4;rgb[5]=0x64b4cf;} platform_palette(rgb);

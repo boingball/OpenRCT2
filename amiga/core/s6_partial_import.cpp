@@ -173,6 +173,39 @@ PartialS6State ImportS6TerrainAndMetadata(const char* path)
             state.tileElements.back().setLastForTile(true);
         }
     }
+    // Read packed fields explicitly. These snapshots are not engine Guest
+    // instances and must never be ticked or installed into EntityRegistry.
+    const auto* entityBytes = static_cast<const uint8_t*>(savedState->GetData()) + 4;
+    for (unsigned slot = 0; slot < RCT2::Limits::kMaxEntities; ++slot)
+    {
+        const auto* p = entityBytes + slot * sizeof(RCT2::Entity);
+        if (p[offsetof(RCT2::Peep, EntityIdentifier)] != static_cast<uint8_t>(RCT12EntityIdentifier::peep)
+            || p[offsetof(RCT2::Peep, PeepType)] != static_cast<uint8_t>(RCT12PeepType::guest)) continue;
+        const auto x = ReadLittleEndian<int16_t>(p + offsetof(RCT2::Peep, x));
+        const auto y = ReadLittleEndian<int16_t>(p + offsetof(RCT2::Peep, y));
+        const auto z = ReadLittleEndian<int16_t>(p + offsetof(RCT2::Peep, z));
+        const auto direction = p[offsetof(RCT2::Peep, EntityDirection)];
+        const auto peepState = p[offsetof(RCT2::Peep, State)];
+        const auto outside = p[offsetof(RCT2::Peep, OutsideOfPark)];
+        const auto shirt = p[offsetof(RCT2::Peep, TshirtColour)];
+        const auto trousers = p[offsetof(RCT2::Peep, TrousersColour)];
+        if (x < 0 || y < 0 || x >= mapSize * 32 || y >= mapSize * 32 || z < 0 || z > 2040
+            || direction > 31 || peepState > 23 || outside > 1 || shirt > 31 || trousers > 31)
+        {
+            ++result.skippedGuestSnapshots;
+            continue;
+        }
+        result.savedGuests.push_back({ static_cast<uint16_t>(slot), static_cast<uint16_t>(x),
+            static_cast<uint16_t>(y), z, direction, peepState, outside, shirt, trousers,
+            p[offsetof(RCT2::Peep, AnimationGroup)] });
+    }
+    std::sort(result.savedGuests.begin(), result.savedGuests.end(), [](const auto& a, const auto& b) {
+        const unsigned ka = (a.x / 32 + a.y / 32) * 256 + a.x / 32;
+        const unsigned kb = (b.x / 32 + b.y / 32) * 256 + b.x / 32;
+        if (ka != kb) return ka < kb;
+        if (a.x + a.y != b.x + b.y) return a.x + a.y < b.x + b.y;
+        return a.slot < b.slot;
+    });
     result.tileIndex = std::make_unique<TilePointerIndex<TileElement>>(
         RCT2::Limits::kMaxMapSize, state.tileElements.data(), state.tileElements.size());
     return result;

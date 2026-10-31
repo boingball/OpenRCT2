@@ -1,4 +1,4 @@
-# OpenRCT2 Amiga core investigation — milestone 0.8
+# OpenRCT2 Amiga core investigation — milestone 0.9
 
 The 0.1 graphics runner has passed the user's WinUAE RTG test with original G1
 graphics. This milestone tackles the **actual engine**, starting with memory,
@@ -7,6 +7,43 @@ a real simulation benchmark on the host, and native C++ runtime probes.
 **There is no native Amiga park simulation executable yet.** The downloadable
 import executables below are diagnostics. The 0.8 viewer displays their
 terrain/path export through the existing RTG backend.
+
+## Saved guest position snapshots (0.9)
+
+The importer now extracts valid guest positions into a separate view-only
+snapshot vector, using explicit little-endian reads from the actual legacy
+Peep field offsets. It retains slot, coordinates, direction, state, outside
+flag, clothing colours and animation group. No Guest objects are constructed
+in EntityRegistry, and the partial GameState remains unsuitable for ticking.
+
+AMAP v2 appends bounded, sorted guest records; the reader still accepts v1.
+The viewer draws static gold markers (cyan for outside-park guests), with
+heading indicators. These are diagnostic markers, not original guest sprites
+or animations; saved clothing/animation metadata is retained for future work.
+Riding and picked-up states are not drawn as walkers. Space toggles markers.
+Markers are drawn with their map cell, so later foreground terrain can cover
+them. This is approximate painter order, not the engine's complete renderer.
+
+The busy park exports 2,189 valid positions and skips 635 unplaced or invalid
+records. The saved in-park counter is 2,775; those numbers need not match because
+snapshots may include outside guests and exclude null/off-map positions. The
+small TestPark has no valid guest positions, so use BusyPark for this feature.
+Skipped records are reported explicitly. Bounds are diagnostic limits, not a
+claim that every valid legacy save/entity state is supported.
+
+Host and emulated 68060 snapshot bytes match. An independent wire fixture
+checks exact packed coordinates, direction, clothing and ordering, and excludes
+staff and a null-position guest. Parser tests reject duplicate slots, bad
+ordering, count/coordinate/state/colour bounds and reserved fields, even with
+recomputed checksums. Renderer tests check exact marker position, hidden
+on-ride state, static output and terrain restoration when toggled off. Both
+resolutions match through the mocked native RTG interface. Existing v1 map
+and legacy demo tests remain covered. Host ASan/UBSan and bare 68060 checks
+pass. Real WinUAE/P96 validation remains outstanding.
+
+The old partial-state fingerprint deliberately still covers only the terrain,
+paths and selected GameState metadata. AMAP's payload checksum and whole-file
+SHA-256 comparisons additionally cover the new snapshot records.
 
 ## Imported terrain/path RTG viewer (0.8)
 

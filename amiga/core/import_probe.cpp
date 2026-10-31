@@ -63,8 +63,8 @@ int main(int argc, char** argv)
         return 20;
     }
     report = std::fopen("OpenRCT2ImportProbe.txt", "w");
-    print("OpenRCT2 partial native GameState import 0.8\n");
-    print("Terrain/paths and selected metadata only; no simulation.\n");
+    print("OpenRCT2 partial native GameState import 0.9\n");
+    print("Terrain/paths, metadata and saved guest snapshots; no simulation.\n");
     int result = 0;
     try
     {
@@ -76,6 +76,8 @@ int main(int argc, char** argv)
         print("Map: %u x %u; surfaces: %lu; paths: %lu\n",
             static_cast<unsigned>(state.mapSize.x), static_cast<unsigned>(state.mapSize.y),
             static_cast<unsigned long>(imported.surfaces), static_cast<unsigned long>(imported.paths));
+        print("Saved guest snapshots: %lu; skipped unplaced/invalid: %lu\n",
+            static_cast<unsigned long>(imported.savedGuests.size()), static_cast<unsigned long>(imported.skippedGuestSnapshots));
         print("Other active map elements omitted: %lu\n", static_cast<unsigned long>(imported.omittedElements));
         print("Ticks: %lu; elapsed months: %lu; month ticks: %u\n",
             static_cast<unsigned long>(state.currentTicks), static_cast<unsigned long>(state.date.monthsElapsed),

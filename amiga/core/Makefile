@@ -69,7 +69,7 @@ $(BUILD)/import-native/%.o: %.cpp | $(BUILD)/import-native
 	$(AMIGA_CXX) $(FLAGS) $(AMIGA_FLAGS) -DOPENRCT2_SMALL_MEMORY -I$(JSON_INCLUDE) -MMD -MP -c $< -o $@
 $(BUILD)/OpenRCT2ImportProbe: $(IMPORT_OBJECTS)
 	$(AMIGA_CXX) $(AMIGA_FLAGS) $^ -o $@ -lm -lpthread -latomic
-$(BUILD)/import-probe-host: $(IMPORT_SOURCES) diagnostic_output.h s6_partial_import.h | $(BUILD)
+$(BUILD)/import-probe-host: $(IMPORT_SOURCES) diagnostic_output.h s6_partial_import.h ../prototype/src/park_map.h | $(BUILD)
 	$(HOST_CXX) $(FLAGS) -DOPENRCT2_SMALL_MEMORY -I$(JSON_INCLUDE) $(IMPORT_SOURCES) -o $@
 .PHONY: import-probes
 import-probes: $(BUILD)/import-probe-host $(BUILD)/OpenRCT2ImportProbe

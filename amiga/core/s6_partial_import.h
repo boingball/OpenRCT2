@@ -6,9 +6,17 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <vector>
 
 // A deliberately isolated partial state. Never install it as the active
 // game state: objects, rides, entities and other simulation data are absent.
+struct SavedGuestSnapshot
+{
+    uint16_t slot, x, y;
+    int16_t z;
+    uint8_t direction, state, outside, shirt, trousers, animationGroup;
+};
+
 struct PartialS6State
 {
     std::unique_ptr<OpenRCT2::GameState_t> state;
@@ -18,6 +26,9 @@ struct PartialS6State
     uint32_t paths = 0;
     uint32_t omittedElements = 0;
     std::string scenarioLabel;
+    // View-only saved positions, separate from the native EntityRegistry.
+    std::vector<SavedGuestSnapshot> savedGuests;
+    uint32_t skippedGuestSnapshots = 0;
 };
 
 PartialS6State ImportS6TerrainAndMetadata(const char* path);

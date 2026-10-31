@@ -92,7 +92,7 @@ jobs:
       - name: Build and verify imported-map RTG viewer
         run: |
           make -C amiga/prototype amiga host test test-asan test-68k check-060
-          map=build/import-verification/host/small_park_car_ride_one_car/ImportedMap.amap
+          map=build/import-verification/host/bpb/ImportedMap.amap
           amiga/prototype/build/runner_host build/park-view.ppm MAP="$map"
           amiga/prototype/build/runner_host build/park-view-low.ppm MAP="$map" LOW
           python3 amiga/prototype/tests/smoke_hunk.py \

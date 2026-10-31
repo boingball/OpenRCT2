@@ -53,8 +53,20 @@ void WritePartialS6Map(const PartialS6State& imported, const char* path)
         }
     }
     WriteLittleEndian<uint32_t>(bytes.data() + PARK_MAP_HEADER + cells * 4, elements);
+    for (const auto& guest : imported.savedGuests)
+    {
+        uint8_t record[PARK_MAP_GUEST_RECORD]{};
+        WriteLittleEndian<uint16_t>(record, guest.slot);
+        WriteLittleEndian<uint16_t>(record+2, guest.x);
+        WriteLittleEndian<uint16_t>(record+4, guest.y);
+        WriteLittleEndian<int16_t>(record+6, guest.z);
+        record[8]=guest.direction; record[9]=guest.state; record[10]=guest.outside;
+        record[11]=guest.shirt; record[12]=guest.trousers; record[13]=guest.animationGroup;
+        bytes.insert(bytes.end(), std::begin(record), std::end(record));
+    }
+    WriteLittleEndian<uint32_t>(bytes.data()+24, imported.savedGuests.size());
     bytes[0]='A'; bytes[1]='M'; bytes[2]='A'; bytes[3]='P';
-    WriteLittleEndian<uint16_t>(bytes.data()+4, 1);
+    WriteLittleEndian<uint16_t>(bytes.data()+4, 2);
     WriteLittleEndian<uint16_t>(bytes.data()+6, side);
     WriteLittleEndian<uint32_t>(bytes.data()+8, cells);
     WriteLittleEndian<uint32_t>(bytes.data()+12, elements);

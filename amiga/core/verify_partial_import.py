@@ -41,6 +41,23 @@ def main():
     tiles[1] = 0x0f  # first tile continues to its queue path
     tiles[8:16] = bytes([5, 0x80, 2, 4, 0x3e, 0xa1, 0x5a, 0xfe])
     saved = bytearray(488816 + 10000 * 256)
+    # Independent packed guest offsets: do not use native structs here.
+    def saved_guest(slot, x, y, z, direction, state=5, outside=0, kind=0):
+        base=4+slot*256
+        saved[base]=1
+        struct.pack_into("<H",saved,base+0x0a,slot)
+        struct.pack_into("<hhh",saved,base+0x0e,x,y,z)
+        saved[base+0x1e]=direction
+        saved[base+0x2a]=outside
+        saved[base+0x2b]=state
+        saved[base+0x2d]=15
+        saved[base+0x2e]=kind
+        saved[base+0x30]=21
+        saved[base+0x31]=7
+    saved_guest(3,76,78,16,24)
+    saved_guest(8,20,20,64,8,outside=1)
+    saved_guest(4,-32768,20,16,0)  # unplaced, skipped
+    saved_guest(5,32,32,16,0,kind=1)  # staff, excluded
     post = 4 + 10000 * 256
     for offset, fmt, value in [(5240, "H", 5), (1160, "H", 9), (2292, "H", 321),
                                (32, "i", 123450), (36, "i", 10000), (40, "I", 4),
@@ -124,16 +141,26 @@ def main():
             assert fp and overview.exists(), run.stdout
             wire = amap.read_bytes()
             magic, version, side, cells, count, source_fp, payload_hash = struct.unpack_from("<4sHHIIII", wire)
-            assert magic == b"AMAP" and version == 1 and side == int(match[1]) and cells == side*side
+            assert magic == b"AMAP" and version == 2 and side == int(match[1]) and cells == side*side
             assert count == int(match[3]) + int(match[4]) and source_fp == int(fp[1], 16)
-            assert wire[24:32] == bytes(8) and len(wire) == 32 + (cells+1)*4 + count*8
+            guests=struct.unpack_from("<I",wire,24)[0]
+            assert guests<=10000 and wire[28:32]==bytes(4)
+            guest_start=32+(cells+1)*4+count*8
+            assert len(wire)==guest_start+guests*16
+            if source in (good,negative_file):
+                assert guests==2
+                expected_guests=(struct.pack("<HHHhBBBBBBBB",8,20,20,64,8,5,1,21,7,15,0,0)
+                    +struct.pack("<HHHhBBBBBBBB",3,76,78,16,24,5,0,21,7,15,0,0))
+                assert wire[guest_start:]==expected_guests,wire[guest_start:].hex()
+                assert "Saved guest snapshots: 2; skipped unplaced/invalid: 1" in run.stdout
+
             checksum = 2166136261
             for byte in wire[32:]: checksum = ((checksum ^ byte)*16777619) & 0xffffffff
             assert checksum == payload_hash
             offsets = struct.unpack_from("<" + "I"*(cells+1), wire, 32)
             assert offsets[0] == 0 and offsets[-1] == count
             assert all(a < b for a,b in zip(offsets,offsets[1:]))
-            result = {"map_sha256": hashlib.sha256(wire).hexdigest(), "size": int(match[1]), "surfaces": int(match[3]), "paths": int(match[4]),
+            result = {"guest_snapshots":guests,"map_sha256": hashlib.sha256(wire).hexdigest(), "size": int(match[1]), "surfaces": int(match[3]), "paths": int(match[4]),
                       "fingerprint": fp[1], "overview_sha256": hashlib.sha256(overview.read_bytes()).hexdigest()}
             results[platform][source.name] = result
             if source == negative_file:

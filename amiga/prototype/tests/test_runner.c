@@ -172,7 +172,7 @@ static void test_park_map(void) {
     assert(!park_map_open(&parsed,NULL,sizeof(blob))&&!park_map_open(&parsed,blob,sizeof(blob)-1));
     for(k=0;k<7;k++) {
         memcpy(bad,blob,sizeof(blob));
-        switch(k){case 0:bad[0]='X';break;case 1:bad[4]=2;break;case 2:bad[6]=0;break;
+        switch(k){case 0:bad[0]='X';break;case 1:bad[4]=3;break;case 2:bad[6]=0;break;
         case 3:putle(bad+32+4,999);break;case 4:bad[32+26*4]=9;break;
         case 5:bad[32+26*4+3]=0xff;break;default:bad[32+26*4+2]=0x80;break;}
         map_hash(bad,sizeof(bad));assert(!park_map_open(&parsed,bad,sizeof(bad)));
@@ -200,11 +200,56 @@ static void test_park_map(void) {
         printf("Imported map parsing/zoom/pan/clipping/dirty rectangles: PASS %s %08lx\n",res?"320x240":"640x480",(unsigned long)checksum(a,bytes));
     }
 }
+static void test_saved_guests(void) {
+    enum { BASE=32+26*4+25*8, SIZE=BASE+2*PARK_MAP_GUEST_RECORD };
+    uint8_t map[SIZE]={0},bad[SIZE];
+    static uint8_t pixels[640*480],back[640*480],without[640*480],terrain_back[640*480];
+    static Runner r,terrain;
+    ParkMap parsed;
+    unsigned i;
+    memcpy(map,"AMAP",4);map[4]=2;map[6]=5;putle(map+8,25);putle(map+12,25);putle(map+24,2);
+    for(i=0;i<=25;i++)putle(map+32+i*4,i);
+    for(i=0;i<25;i++)map[32+26*4+i*8+1]=2;
+    // Two depth-ordered saved positions; the second is on a ride and hidden.
+    for(i=0;i<2;i++) {
+        uint8_t *g=map+BASE+i*PARK_MAP_GUEST_RECORD;
+        put16(g,i+1);put16(g+2,80+i*32);put16(g+4,80+i*32);put16(g+6,16);
+        g[8]=8;g[9]=i?3:5;g[11]=21;g[12]=7;g[13]=15;
+    }
+    map_hash(map,SIZE);assert(park_map_open(&parsed,map,SIZE)&&parsed.guest_count==2);
+    for(i=0;i<9;i++) {
+        memcpy(bad,map,SIZE);
+        switch(i) {
+            case 0:putle(bad+24,10001);break;
+            case 1:put16(bad+BASE+16,1);break;
+            case 2:put16(bad+BASE+6,65535);break;
+            case 3:put16(bad+BASE+2,160);break;
+            case 4:put16(bad+BASE+16+2,0);put16(bad+BASE+16+4,0);break;
+            case 5:bad[BASE+9]=24;break;
+            case 6:bad[BASE+10]=2;break;
+            case 7:bad[BASE+15]=1;break;
+            default:bad[BASE+11]=32;break;
+        }
+        map_hash(bad,SIZE);assert(!park_map_open(&parsed,bad,SIZE));
+    }
+    runner_init(&r,pixels,back,640,480);assert(runner_set_map(&r,map,SIZE));runner_render(&r);
+    assert(pixels[234*640+320]==3); // exact saved-position marker head
+    assert(pixels[250*640+320]!=3); // on-ride position is not drawn as a walker
+    memcpy(without,pixels,sizeof(pixels));r.phase+=137;r.full_redraw=1;runner_render(&r);
+    assert(!memcmp(pixels,without,sizeof(pixels))); // no invented movement/animation
+    runner_input(&r,KEY_PAUSE);runner_render(&r);assert(!r.map_guests_visible&&pixels[234*640+320]!=3);
+    // Hiding snapshots exactly restores the v1 terrain viewport.
+    map[4]=1;putle(map+24,0);map_hash(map,BASE);
+    runner_init(&terrain,without,terrain_back,640,480);assert(runner_set_map(&terrain,map,BASE));runner_render(&terrain);
+    assert(!memcmp(pixels+48*640,without+48*640,(480-96)*640));
+    runner_input(&r,KEY_PAUSE);runner_render(&r);assert(pixels[234*640+320]==3);
+    puts("Saved guest bounds/order/identity/state/toggle/static-position checks: PASS");
+}
 int main(void) {
     uint32_t a,b;
     test_g1(); test_palette(); test_options(); test_upstream_fixture();
     a=test_scene(640,480); b=test_scene(320,240);
-    test_park_map();
+    test_park_map(); test_saved_guests();
     printf("G1 clipping/malformed files/palettes/options/dirty redraw: PASS\n640x480 %08lx 320x240 %08lx\n",(unsigned long)a,(unsigned long)b);
     return 0;
 }

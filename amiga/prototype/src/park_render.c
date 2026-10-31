@@ -66,14 +66,17 @@ int runner_set_map(Runner *r,const void *data,uint32_t size) {
     a=park_map_offset(&r->map,(r->map.side/2)*(r->map.side+1));
     b=park_map_offset(&r->map,(r->map.side/2)*(r->map.side+1)+1);
     while(a<b){const uint8_t *p=r->map.records+a++*PARK_MAP_RECORD;if(!p[0])r->map_base=p[1];}
-    r->guests=0;r->atlas=0;r->pan_x=r->pan_y=0;r->full_redraw=1;
+    r->map_guests_visible=1;r->guests=0;r->atlas=0;r->pan_x=r->pan_y=0;r->full_redraw=1;
     return 1;
 }
 void runner_map_background(Runner *r,Canvas *c) {
     int z=1<<r->map_zoom,side=(int)r->map.side,sum,x;
+    unsigned guest_cursor=0;
     int ox=c->width/2+r->pan_x,oy=c->height/2-(side-1)*16/z+r->pan_y;
     for(sum=0;sum<=2*(side-1);sum++)for(x=max(0,sum-side+1);x<side&&x<=sum;x++) {
         int y=sum-x,sx=ox+(x-y)*32/z,plane=oy+sum*16/z;uint32_t n,end;
+        unsigned first_guest=guest_cursor,cell_key=(unsigned)sum*256+(unsigned)x;
+        while(guest_cursor<r->map.guest_count && park_map_guest_key(r->map.guest_records+guest_cursor*PARK_MAP_GUEST_RECORD)==cell_key)guest_cursor++;
         if(sx+32/z<0||sx-32/z>=c->width)continue;
         n=park_map_offset(&r->map,(unsigned)(x+y*side));end=park_map_offset(&r->map,(unsigned)(x+y*side)+1);
         for(;n<end;n++) {
@@ -131,6 +134,19 @@ void runner_map_background(Runner *r,Canvas *c) {
                 if(corners&4)path_rect(c,sx,sy,z,p,16,0,32,16,colour);
                 if(corners&8)path_rect(c,sx,sy,z,p,0,0,16,16,colour);
             }
+        }
+        if(r->map_guests_visible)for(;first_guest<guest_cursor;first_guest++) {
+            const uint8_t *g=r->map.guest_records+first_guest*PARK_MAP_GUEST_RECORD;
+            int wx=(int)park_map_u16(g+2),wy=(int)park_map_u16(g+4),wz=(int)park_map_u16(g+6);
+            int gx=ox+(wx-wy)/z,gy=oy+(wx+wy-32)/2/z-(wz-r->map_base*8)/z;
+            int height=r->map_zoom<2?6:3,width=r->map_zoom<2?3:1,dir=g[8]>>3;
+            static const int dx[4]={-1,-1,1,1},dy[4]={-1,1,1,-1};
+            // Riding/picked guests are not visible walking positions. Markers
+            // are deliberately diagnostic; no invented animation or movement.
+            if(g[9]==3||g[9]==9)continue;
+            runner_fill(c,gx-width/2,gy-height,width,height,g[10]?5:4);
+            runner_fill(c,gx,gy-height,1,1,3);
+            line(c,(Point){gx,gy},(Point){gx+dx[dir]*2,gy+dy[dir]},3);
         }
     }
 }

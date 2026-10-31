@@ -48,3 +48,43 @@ entries, not loaded object graphics.
 
 The viewer validates the complete payload before using it. A matching checksum
 does not bypass its count, offset, enum, flag and reserved-field checks.
+
+## Version 2: saved guest snapshots (viewer 0.9)
+
+Version 2 retains the same header length and terrain/path records. Header byte
+4 becomes u16 version 2; bytes 24..27 are u32 guest count (0..10000), and
+28..31 remain reserved zero. After all terrain/path records, exactly guest
+count 16-byte records follow. The payload checksum includes these records.
+Readers accepting only v1 must reject v2 rather than ignore trailing data.
+The 0.9 reader accepts both versions.
+
+| Offset within guest record | Type | Meaning |
+| --- | --- | --- |
+| 0 | u16 | Legacy entity array slot, 0..9999; unique in this file |
+| 2 | u16 | Saved world x, less than side * 32 |
+| 4 | u16 | Saved world y, less than side * 32 |
+| 6 | i16 | Saved world z, 0..2040 for this diagnostic |
+| 8 | u8 | Direction, 0..31 |
+| 9 | u8 | Legacy PeepState, 0..23 |
+| 10 | u8 | Outside-of-park flag, 0 or 1 |
+| 11 | u8 | Shirt colour index, 0..31 |
+| 12 | u8 | Trousers colour index, 0..31 |
+| 13 | u8 | Legacy animation group; retained without interpretation |
+| 14 | 2 bytes | Reserved zero |
+
+Records are sorted by `(floor(x/32)+floor(y/32))*256+floor(x/32)`, then by
+`x+y`, then by slot. The viewer verifies this order and uniqueness before
+using it. It draws markers after each map cell in that same painter order;
+this is approximate occlusion, not the full engine paint algorithm.
+
+The importer scans only actual legacy peep records of guest type. It skips
+coordinates outside this diagnostic's bounds, unplaced guests (including the
+null x sentinel) and invalid direction/state/flag/colour fields, reporting the
+skip count. Staff are excluded. These constraints deliberately support a
+bounded visual diagnostic, not every legacy state. On-ride state 3 and picked
+state 9 remain in the file if placed, but are hidden by the viewer.
+
+Guest data is separate from native EntityRegistry and is not tickable.
+The header's partial-state fingerprint remains unchanged and does not include
+guests; the payload checksum and file hash cover guest records. The saved
+in-park guest counter can differ from the number of exported snapshots.
