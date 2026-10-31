@@ -88,3 +88,54 @@ Guest data is separate from native EntityRegistry and is not tickable.
 The header's partial-state fingerprint remains unchanged and does not include
 guests; the payload checksum and file hash cover guest records. The saved
 in-park guest counter can differ from the number of exported snapshots.
+
+## Version 3: track footprints and ride catalogue (viewer 0.10)
+
+Version is u16 3. Header bytes 28..31 now hold u32 ride count, 0..255.
+The element count/table includes both terrain/path records and type-2 track
+records. Guest records follow these elements as in v2; exactly ride count
+8-byte catalogue records follow the guests. The checksum covers all three
+sections. V1/v2 readers must reject v3. The 0.10 reader supports all versions.
+
+Track footprint records are eight bytes:
+
+| Byte | Meaning |
+| --- | --- |
+| 0 | 2 |
+| 1 | Saved base height, world units / 8, 0..254 |
+| 2 | Native ghost/invisible mask 0x30 |
+| 3 | Direction, 0..3 |
+| 4 | Raw legacy track type |
+| 5 | Raw legacy sequence/station/brake/photo byte |
+| 6 | Raw legacy colour/seat/door/inverted byte |
+| 7 | Ride slot, 0..254, or null 255 |
+
+The raw bytes preserve their packed legacy meaning; maze rides also use bytes
+5..6 as a little-endian maze entry. The viewer does not reconstruct that
+geometry. Only occupied tile/base-height outlines and a direction indicator
+are drawn; track types 1..3 receive station markers. Occupancy/clearance, full
+paint ordering, rail connections, supports and vehicle/object graphics are
+not encoded by this diagnostic.
+
+Ride catalogue records are eight bytes:
+
+| Byte | Meaning |
+| --- | --- |
+| 0 | Legacy ride slot, 0..254, strictly increasing and unique |
+| 1 | Legacy ride type, 0..254 (255 means unused and is omitted) |
+| 2 | Legacy ride object slot, retained without object loading |
+| 3 | Status, 0..3 |
+| 4 | Operating mode, retained without interpretation |
+| 5 | Saved overview cell x |
+| 6 | Saved overview cell y |
+| 7 | Station count, 0..4 |
+
+Overview coordinates can be null 255 or outside the active map. The viewer
+uses them for ride focus only if both are inside the map. Every non-null track
+ride reference must exist in the catalogue. The importer skips unresolved
+references and invalid catalogue entries and reports both counts; the viewer
+rejects such references in an AMAP file. The combined record count remains
+bounded at 196608, not an additional allowance beyond the terrain/path limit.
+Tracks are appended to each cell's terrain/path records in source order. This
+is a footprint overlay with approximate occlusion, not complete track paint
+order. Native GameState/Ride/EntityRegistry remain isolated and untickable.

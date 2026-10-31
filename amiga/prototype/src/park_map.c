@@ -12,23 +12,33 @@ uint32_t park_map_offset(const ParkMap *map, unsigned tile) { return le32(map->o
 int park_map_open(ParkMap *map, const void *data, uint32_t size) {
     const uint8_t *p = data;
     uint32_t cells, count, expected, hash=2166136261u, i, start=0;
-    unsigned side, version, guests;
+    unsigned side, version, guests, rides;
+    uint8_t ride_present[PARK_MAP_MAX_RIDES]={0};
     ParkMap candidate;
     *map = (ParkMap){0};
-    if (size < PARK_MAP_HEADER || !p || p[0]!='A' || p[1]!='M' || p[2]!='A' || p[3]!='P' || (p[4]!=1 && p[4]!=2) || p[5]) return 0;
+    if (size < PARK_MAP_HEADER || !p || p[0]!='A' || p[1]!='M' || p[2]!='A' || p[3]!='P' || (p[4]<1 || p[4]>3) || p[5]) return 0;
     side = p[6] | (unsigned)p[7]<<8;
     if (side<5 || side>256) return 0;
     cells = side*side; count=le32(p+12);
     if (le32(p+8)!=cells || count<cells || count>PARK_MAP_MAX_ELEMENTS) return 0;
-    version=p[4];guests=version==2?le32(p+24):0;
-    if(guests>PARK_MAP_MAX_GUESTS)return 0;
-    for (i=version==2?28:24;i<32;i++) if (p[i]) return 0;
-    expected=PARK_MAP_HEADER+(cells+1)*4u+count*PARK_MAP_RECORD+guests*PARK_MAP_GUEST_RECORD;
+    version=p[4];guests=version>=2?le32(p+24):0;
+    rides=version==3?le32(p+28):0;
+    if(guests>PARK_MAP_MAX_GUESTS || rides>PARK_MAP_MAX_RIDES)return 0;
+    for (i=version==3?32:version==2?28:24;i<32;i++) if (p[i]) return 0;
+    expected=PARK_MAP_HEADER+(cells+1)*4u+count*PARK_MAP_RECORD+guests*PARK_MAP_GUEST_RECORD+rides*PARK_MAP_RIDE_RECORD;
     if (size!=expected) return 0;
     for (i=PARK_MAP_HEADER;i<size;i++) hash=(hash^p[i])*16777619u;
     if (hash!=le32(p+20)) return 0;
     candidate=(ParkMap){p+PARK_MAP_HEADER,p+PARK_MAP_HEADER+(cells+1)*4u,
-        p+PARK_MAP_HEADER+(cells+1)*4u+count*PARK_MAP_RECORD,count,le32(p+16),guests,side};
+        p+PARK_MAP_HEADER+(cells+1)*4u+count*PARK_MAP_RECORD,
+        p+PARK_MAP_HEADER+(cells+1)*4u+count*PARK_MAP_RECORD+guests*PARK_MAP_GUEST_RECORD,
+        count,le32(p+16),guests,rides,0,side};
+    for(i=0;i<rides;i++) {
+        const uint8_t *ride=candidate.ride_records+i*PARK_MAP_RIDE_RECORD;
+        if(ride[0]>=PARK_MAP_MAX_RIDES || ride[1]==255 || ride[3]>3 || ride[7]>4
+            || (i && ride[0]<=candidate.ride_records[(i-1)*PARK_MAP_RIDE_RECORD]))return 0;
+        ride_present[ride[0]]=1;
+    }
     if (park_map_offset(&candidate,0)!=0) return 0;
     for (i=0;i<cells;i++) {
         uint32_t end=park_map_offset(&candidate,i+1), n;
@@ -36,9 +46,13 @@ int park_map_open(ParkMap *map, const void *data, uint32_t size) {
         if (end<=start || end>count) return 0;
         for (n=start;n<end;n++) {
             const uint8_t *r=candidate.records+n*PARK_MAP_RECORD;
-            if (r[0]>1 || r[1]==255 || (r[2]&~0x30u)) return 0;
+            if (r[0]>(version==3?2:1) || r[1]==255 || (r[2]&~0x30u)) return 0;
             if (!r[0]) { if ((r[3]&3)==3 || ((r[3]>>2)&3)==3 || ((r[3]>>4)&3)==3 || (r[3]>>6)==3 || r[4]>31 || r[5]>62 || r[7]>15) return 0; surfaces++; }
-            else if ((r[4]&~31u) || r[5]>15 || r[6] || r[7]) return 0;
+            else if (r[0]==1) { if ((r[4]&~31u) || r[5]>15 || r[6] || r[7]) return 0; }
+            else {
+                if(r[3]>3 || (r[7]!=255 && !ride_present[r[7]]))return 0;
+                candidate.track_count++;
+            }
         }
         if (surfaces!=1) return 0;
         start=end;

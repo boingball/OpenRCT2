@@ -66,7 +66,7 @@ int runner_set_map(Runner *r,const void *data,uint32_t size) {
     a=park_map_offset(&r->map,(r->map.side/2)*(r->map.side+1));
     b=park_map_offset(&r->map,(r->map.side/2)*(r->map.side+1)+1);
     while(a<b){const uint8_t *p=r->map.records+a++*PARK_MAP_RECORD;if(!p[0])r->map_base=p[1];}
-    r->map_guests_visible=1;r->guests=0;r->atlas=0;r->pan_x=r->pan_y=0;r->full_redraw=1;
+    r->map_tracks_visible=1;r->map_ride_selected=-1;r->map_guests_visible=1;r->guests=0;r->atlas=0;r->pan_x=r->pan_y=0;r->full_redraw=1;
     return 1;
 }
 void runner_map_background(Runner *r,Canvas *c) {
@@ -121,7 +121,7 @@ void runner_map_background(Runner *r,Canvas *c) {
                 }
                 water(c,sx,sy,z,p);
                 if(r->grid)for(i=0;i<4;i++)line(c,top[i],top[(i+1)&3],9);
-            } else {
+            } else if(p[0]==1) {
                 uint8_t colour=(p[4]&4)?5:8;unsigned corners=p[3]>>4;
                 if(sy+16/z<c->top||sy-32/z>=c->bottom)continue;
                 path_rect(c,sx,sy,z,p,10,10,22,22,colour);
@@ -133,6 +133,16 @@ void runner_map_background(Runner *r,Canvas *c) {
                 if(corners&2)path_rect(c,sx,sy,z,p,16,16,32,32,colour);
                 if(corners&4)path_rect(c,sx,sy,z,p,16,0,32,16,colour);
                 if(corners&8)path_rect(c,sx,sy,z,p,0,0,16,16,colour);
+            } else if(r->map_tracks_visible) {
+                Point corners[4]={{sx,sy-16/z},{sx+32/z,sy},{sx,sy+16/z},{sx-32/z,sy}};
+                uint8_t colour=p[7]==255?9:5;unsigned edge;
+                if(r->map_ride_selected>=0 && p[7]==r->map.ride_records[r->map_ride_selected*PARK_MAP_RIDE_RECORD])colour=4;
+                // Occupied tile outline at saved base height, not fabricated
+                // coaster geometry. Keep every legacy track/sequence byte.
+                for(edge=0;edge<4;edge++)line(c,corners[edge],corners[(edge+1)&3],colour);
+                if(p[4]>=1 && p[4]<=3)runner_fill(c,sx-1,sy-1,3,3,3);
+                { static const int dx[4]={-1,-1,1,1},dy[4]={-1,1,1,-1};
+                  line(c,(Point){sx,sy},(Point){sx+dx[p[3]]*4,sy+dy[p[3]]*2},colour); }
             }
         }
         if(r->map_guests_visible)for(;first_guest<guest_cursor;first_guest++) {

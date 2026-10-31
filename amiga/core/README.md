@@ -1,4 +1,4 @@
-# OpenRCT2 Amiga core investigation — milestone 0.9
+# OpenRCT2 Amiga core investigation — milestone 0.10
 
 The 0.1 graphics runner has passed the user's WinUAE RTG test with original G1
 graphics. This milestone tackles the **actual engine**, starting with memory,
@@ -7,6 +7,41 @@ a real simulation benchmark on the host, and native C++ runtime probes.
 **There is no native Amiga park simulation executable yet.** The downloadable
 import executables below are diagnostics. The 0.8 viewer displays their
 terrain/path export through the existing RTG backend.
+
+## Ride catalogue and track footprints (0.10)
+
+The partial importer now reads an isolated ride catalogue and track snapshots.
+These do not populate native Ride or TrackElement instances and cannot be
+simulated. Ride table fields use the actual legacy definition's offsets and
+explicit byte reads: slot, legacy type, object slot, status, mode, overview
+cell and station count. Invalid status/station counts are skipped and reported.
+The catalogue uses legacy numeric IDs; ride names/objects are not loaded.
+
+Track snapshots retain cell/base height, ghost/invisible flags, direction,
+legacy track type and raw sequence/colour bytes, linked to a catalogue ride
+(or the legacy null ride 255). A reference to an omitted/absent ride is skipped
+and counted. The GameState terrain/path fingerprint remains unchanged: the
+snapshots are separate and are covered by AMAP's checksum/file comparison.
+
+AMAP v3 adds track records and the ride catalogue, while the viewer continues
+to accept v1 and v2. The view outlines occupied track tiles in cyan at their
+saved base heights and marks station types 1..3 in white. These are diagnostic
+footprints, not reconstructed rails, supports, vehicles, shops or object
+images. `+`/`-` cycle the sparse ride catalogue, highlight the selected ride in
+gold and centre on its saved overview cell when that cell is in bounds. After
+the last ride, selection cycles back to all rides. Tab hides/shows footprints;
+Space still toggles static guest markers; Home centres the map.
+
+The busy fixture contains 134 ride snapshots and 9,175 track footprints, with
+no invalid ride entries or unresolved track references at this checkpoint.
+Small TestPark contains one ride and 49 footprints. Independent wire checks
+verify exact ride fields, raw track bytes, coordinates and unresolved-reference
+skipping on host and 68060. Parser tests reject duplicate/unsorted catalogue
+IDs, invalid status/station counts, track directions and unresolved references,
+even with recomputed checksums. Selection/highlighting/toggle tests pass on
+host ASan/UBSan and the bare 68060 model. Native HUNK startup/RTG/cleanup
+checks pass, and busy-park viewport pixels match the host at both resolutions.
+Real WinUAE/P96/CGX validation and native frame rates remain unverified.
 
 ## Saved guest position snapshots (0.9)
 

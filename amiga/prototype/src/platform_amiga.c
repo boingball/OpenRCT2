@@ -249,7 +249,7 @@ void platform_close(void) {
     if (intuition) os_closelib(intuition); intuition=0;
     if (gfx) os_closelib(gfx); gfx=0;
 }
-__attribute__((used)) static const char version[]="$VER: OpenRCT2ParkView 0.9 (31.10.2026) 68060 RTG graphics prototype";
+__attribute__((used)) static const char version[]="$VER: OpenRCT2ParkView 0.10 (31.10.2026) 68060 RTG graphics prototype";
 int main(void) {
     options_init(&runner_options);
     if (!options_parse(&runner_options,cli_args,(int)cli_arglen)) {

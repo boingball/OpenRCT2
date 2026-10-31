@@ -42,7 +42,7 @@ enum {
 typedef struct {
     G1 g1;
     ParkMap map;
-    int map_zoom, map_base, map_guests_visible;
+    int map_zoom, map_base, map_guests_visible, map_tracks_visible, map_ride_selected;
     Canvas canvas;
     uint8_t *background;
     uint8_t dirty[MAX_DIRTY];

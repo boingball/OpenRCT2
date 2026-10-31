@@ -15,6 +15,7 @@ void WritePartialS6Map(const PartialS6State& imported, const char* path)
     const unsigned cells = side * side;
     std::vector<uint8_t> bytes(PARK_MAP_HEADER + (cells + 1) * 4);
     unsigned elements = 0;
+    size_t trackCursor = 0;
     for (unsigned y = 0; y < side; ++y)
     {
         for (unsigned x = 0; x < side; ++x)
@@ -50,8 +51,18 @@ void WritePartialS6Map(const PartialS6State& imported, const char* path)
                 bytes.insert(bytes.end(), std::begin(record), std::end(record));
                 ++elements;
             } while (!last);
+            while (trackCursor < imported.savedTracks.size()
+                && imported.savedTracks[trackCursor].x == x && imported.savedTracks[trackCursor].y == y)
+            {
+                const auto& record = imported.savedTracks[trackCursor++].record;
+                if (elements >= PARK_MAP_MAX_ELEMENTS) throw std::runtime_error("Map snapshot element capacity exceeded");
+                bytes.insert(bytes.end(), record.begin(), record.end());
+                ++elements;
+            }
         }
     }
+    if (elements > PARK_MAP_MAX_ELEMENTS || trackCursor != imported.savedTracks.size())
+        throw std::runtime_error("Map snapshot element capacity/order invalid");
     WriteLittleEndian<uint32_t>(bytes.data() + PARK_MAP_HEADER + cells * 4, elements);
     for (const auto& guest : imported.savedGuests)
     {
@@ -64,9 +75,11 @@ void WritePartialS6Map(const PartialS6State& imported, const char* path)
         record[11]=guest.shirt; record[12]=guest.trousers; record[13]=guest.animationGroup;
         bytes.insert(bytes.end(), std::begin(record), std::end(record));
     }
+    for (const auto& ride : imported.savedRides) bytes.insert(bytes.end(), ride.begin(), ride.end());
     WriteLittleEndian<uint32_t>(bytes.data()+24, imported.savedGuests.size());
+    WriteLittleEndian<uint32_t>(bytes.data()+28, imported.savedRides.size());
     bytes[0]='A'; bytes[1]='M'; bytes[2]='A'; bytes[3]='P';
-    WriteLittleEndian<uint16_t>(bytes.data()+4, 2);
+    WriteLittleEndian<uint16_t>(bytes.data()+4, 3);
     WriteLittleEndian<uint16_t>(bytes.data()+6, side);
     WriteLittleEndian<uint32_t>(bytes.data()+8, cells);
     WriteLittleEndian<uint32_t>(bytes.data()+12, elements);

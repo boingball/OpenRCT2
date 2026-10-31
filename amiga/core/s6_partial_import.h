@@ -17,6 +17,12 @@ struct SavedGuestSnapshot
     uint8_t direction, state, outside, shirt, trousers, animationGroup;
 };
 
+struct SavedTrackSnapshot
+{
+    uint16_t x, y;
+    std::array<uint8_t, 8> record;
+};
+
 struct PartialS6State
 {
     std::unique_ptr<OpenRCT2::GameState_t> state;
@@ -29,6 +35,9 @@ struct PartialS6State
     // View-only saved positions, separate from the native EntityRegistry.
     std::vector<SavedGuestSnapshot> savedGuests;
     uint32_t skippedGuestSnapshots = 0;
+    std::vector<SavedTrackSnapshot> savedTracks;
+    std::vector<std::array<uint8_t, 8>> savedRides;
+    uint32_t skippedTrackSnapshots = 0, skippedRideSnapshots = 0;
 };
 
 PartialS6State ImportS6TerrainAndMetadata(const char* path);

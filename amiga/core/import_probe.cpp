@@ -63,8 +63,8 @@ int main(int argc, char** argv)
         return 20;
     }
     report = std::fopen("OpenRCT2ImportProbe.txt", "w");
-    print("OpenRCT2 partial native GameState import 0.9\n");
-    print("Terrain/paths, metadata and saved guest snapshots; no simulation.\n");
+    print("OpenRCT2 partial native GameState import 0.10\n");
+    print("Terrain/paths, metadata, guest and ride/track snapshots; no simulation.\n");
     int result = 0;
     try
     {
@@ -78,6 +78,13 @@ int main(int argc, char** argv)
             static_cast<unsigned long>(imported.surfaces), static_cast<unsigned long>(imported.paths));
         print("Saved guest snapshots: %lu; skipped unplaced/invalid: %lu\n",
             static_cast<unsigned long>(imported.savedGuests.size()), static_cast<unsigned long>(imported.skippedGuestSnapshots));
+        print("Track footprints: %lu; skipped unresolved rides: %lu\n",
+            static_cast<unsigned long>(imported.savedTracks.size()), static_cast<unsigned long>(imported.skippedTrackSnapshots));
+        print("Ride snapshots: %lu; skipped invalid: %lu\n",
+            static_cast<unsigned long>(imported.savedRides.size()), static_cast<unsigned long>(imported.skippedRideSnapshots));
+        for (const auto& ride : imported.savedRides)
+            print("Ride %u: legacy type %u; object slot %u; status %u; mode %u; stations %u\n",
+                unsigned(ride[0]), unsigned(ride[1]), unsigned(ride[2]), unsigned(ride[3]), unsigned(ride[4]), unsigned(ride[7]));
         print("Other active map elements omitted: %lu\n", static_cast<unsigned long>(imported.omittedElements));
         print("Ticks: %lu; elapsed months: %lu; month ticks: %u\n",
             static_cast<unsigned long>(state.currentTicks), static_cast<unsigned long>(state.date.monthsElapsed),

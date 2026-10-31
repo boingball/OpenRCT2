@@ -1,11 +1,11 @@
-# OpenRCT2 Amiga imported park viewer 0.9
+# OpenRCT2 Amiga imported park viewer 0.10
 
 Targets 68060, 64 MB Fast RAM, AmigaOS 3.1+ and an 8-bit P96/CyberGraphX RTG
 mode. This milestone displays **real imported terrain/path data**, with
-simplified geometry and colours. It does not simulate the park or display
-rides or scenery. Saved guest positions appear as static diagnostic markers.
+simplified geometry and colours. It displays saved track footprints and static guest markers. It does not
+simulate the park or load ride/scenery graphics.
 
-The 0.9 download includes pre-exported maps, so no G1 data or conversion step
+The 0.10 download includes pre-exported maps, so no G1 data or conversion step
 is needed to try the viewer. In its drawer, run:
 
 ```text
@@ -15,7 +15,9 @@ OpenRCT2ParkView MAP=BusyPark.amap LOW
 ```
 
 Use cursor keys to pan, `[` to zoom out, `]` to zoom in, Home/H to centre,
-G for the terrain grid, Space to toggle guest markers, and Escape to quit. B starts a ten-second benchmark;
+G for the terrain grid, Space to toggle guest markers, and Escape to quit.
+Use `+`/`-` to cycle rides and focus/highlight their track footprint; Tab toggles
+track outlines. The bottom row shows legacy ride ID/type/status/station count. B starts a ten-second benchmark;
 in map view it forces a complete map redraw each frame and measures that plus
 RTG copy and frame wait. Normal stationary map viewing caches the background.
 Results use the existing `OpenRCT2Runner.bench` filename. This is a graphics
@@ -41,7 +43,14 @@ and picked-up guests are hidden. BusyPark includes 2,189 valid snapshots.
 Unplaced/off-map or invalid records are skipped and counted by the importer.
 The saved guest counter can differ from this snapshot count. Markers do not
 move or simulate AI, and clothing/animation metadata is not rendered yet.
-AMAP v1 terrain-only maps remain supported. Water/terrain and
+AMAP v1 terrain-only and v2 guest-snapshot maps remain supported.
+AMAP v3 adds track footprints and a ride catalogue: BusyPark has 134 rides and
+9,175 track records; TestPark has one ride and 49 track records. Cyan outlines
+show occupied track tiles at saved base heights; the selected ride is gold,
+and station track types have white markers. These are diagnostic footprints,
+not coaster rail geometry or original ride graphics. Numeric types/object
+slots are retained without loading or resolving ride assets/names. Invalid
+ride snapshots and unresolved references are skipped and reported. Water/terrain and
 path connections are approximate rendering, not OpenRCT2's full painter or
 object manager. Optional original RCT2 G1 data provides the existing sprite
 browser and flat grass sprite at original zoom. No original game assets are

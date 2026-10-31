@@ -118,6 +118,21 @@ PartialS6State ImportS6TerrainAndMetadata(const char* path)
     result.scenarioLabel.assign(label, static_cast<size_t>(labelLength));
 #undef FIELD
 
+    std::array<bool, RCT2::Limits::kMaxRidesInPark> ridePresent{};
+    for (unsigned slot = 0; slot < RCT2::Limits::kMaxRidesInPark; ++slot)
+    {
+        const size_t relative = offsetof(Legacy, Rides) - start + slot * sizeof(RCT2::Ride);
+        auto field = [&](size_t offset) { return scalar<uint8_t>(*savedState, relative + offset); };
+        const auto type = field(offsetof(RCT2::Ride, type));
+        if (type == 255) continue;
+        const auto status = field(offsetof(RCT2::Ride, status));
+        const auto stations = field(offsetof(RCT2::Ride, numStations));
+        if (status > 3 || stations > 4) { ++result.skippedRideSnapshots; continue; }
+        result.savedRides.push_back({ static_cast<uint8_t>(slot), type,
+            field(offsetof(RCT2::Ride, subtype)), status, field(offsetof(RCT2::Ride, mode)),
+            field(offsetof(RCT2::Ride, overallView)), field(offsetof(RCT2::Ride, overallView) + 1), stations });
+        ridePresent[slot] = true;
+    }
     std::array<ObjectEntryIndex, 32> terrain{};
     for (unsigned i = 0; i < terrain.size(); ++i) terrain[i] = i;
     std::array<ObjectEntryIndex, 16> legacyPaths;
@@ -145,7 +160,22 @@ PartialS6State ImportS6TerrainAndMetadata(const char* path)
                 if (type == RCT12TileElementType::eightCarsCorrupt14 || type == RCT12TileElementType::eightCarsCorrupt15)
                 { restInvisible = true; continue; }
                 if (type != RCT12TileElementType::surface && type != RCT12TileElementType::path)
-                { ++result.omittedElements; nextInvisible = false; continue; }
+                {
+                    if (type == RCT12TileElementType::track)
+                    {
+                        const auto* raw = reinterpret_cast<const uint8_t*>(&src);
+                        if (raw[7] != 255 && !ridePresent[raw[7]]) ++result.skippedTrackSnapshots;
+                        else
+                        {
+                            TileElement base;
+                            RCT2::ImportS6TileBase(base, src, nextInvisible || restInvisible);
+                            result.savedTracks.push_back({ static_cast<uint16_t>(x), static_cast<uint16_t>(y),
+                                { 2, src.baseHeight, static_cast<uint8_t>(base.flags & 0x30),
+                                    src.getDirection(), raw[4], raw[5], raw[6], raw[7] } });
+                        }
+                    }
+                    ++result.omittedElements; nextInvisible = false; continue;
+                }
                 check(state.tileElements.size() < MemoryProfile::kTileElements, "Imported tile capacity exceeded");
                 auto& dst = state.tileElements.emplace_back();
                 RCT2::ImportS6TileBase(dst, src, nextInvisible || restInvisible);
