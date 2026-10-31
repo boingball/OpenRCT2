@@ -20,7 +20,16 @@ set(AMIGA_CPU_FLAGS "-m68020 -msoft-float" CACHE STRING "CPU/FPU flags")
 # redefined before every translation unit.
 set(CMAKE_C_FLAGS_INIT   "${AMIGA_CPU_FLAGS} -fsigned-char -mcrt=nix20")
 set(CMAKE_CXX_FLAGS_INIT "${AMIGA_CPU_FLAGS} -fsigned-char -mcrt=nix20 -include ${CMAKE_CURRENT_LIST_DIR}/m68k-amigaos-int32.h")
-set(CMAKE_EXE_LINKER_FLAGS_INIT "-mcrt=nix20")
+# open4's -m68060 selects libm060 even with -msoft-float. Its CPU
+# aliases still select libm060 when -m68000 is also present. Keep compile
+# FLAGS out of the final link rule so the driver sees only the runtime CPU.
+# ABI flags required for linking (CRT, soft float) are explicit below.
+set(AMIGA_RUNTIME_CPU_FLAGS "-m68000 -msoft-float" CACHE STRING "Software-float runtime multilib selection")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "${AMIGA_RUNTIME_CPU_FLAGS} -mcrt=nix20")
+set(CMAKE_C_LINK_EXECUTABLE
+    "<CMAKE_C_COMPILER> <CMAKE_C_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>")
+set(CMAKE_CXX_LINK_EXECUTABLE
+    "<CMAKE_CXX_COMPILER> <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>")
 # libpthread/libatomic must come after every object and library.
 set(CMAKE_CXX_STANDARD_LIBRARIES "-lpthread -latomic" CACHE STRING "")
 set(CMAKE_C_STANDARD_LIBRARIES "-lpthread -latomic" CACHE STRING "")

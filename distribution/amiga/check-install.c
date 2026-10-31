@@ -1,8 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Integer-only preflight: run before C++ runtime initialisers in the game. */
-#include <exec/execbase.h>
 #include <proto/dos.h>
-#include <proto/exec.h>
 #include <dos/dos.h>
 #include <string.h>
 
@@ -47,14 +45,7 @@ int main(int argc, char** argv)
             return 10;
         }
     }
-    if (!(SysBase->AttnFlags & (AFF_68881 | AFF_68882 | AFF_FPU40)))
-    {
-        message("This open4 integration build requires an FPU in its linked runtime.\n"
-            "In WinUAE enable the 68060 FPU, then try again.\n"
-            "Application soft-float flags do not remove this runtime requirement.\n");
-        return 10;
-    }
-    message(cpuOnly ? "FPU prerequisite: PASS (game startup not yet tested).\n"
-        : "Original-data path / FPU prerequisites: PASS (game startup not yet tested).\n");
+    message(cpuOnly ? "FPU prerequisite: none (not a test of the game runtime).\n"
+        : "Original-data path prerequisite: PASS (game startup not yet tested).\n");
     return 0;
 }

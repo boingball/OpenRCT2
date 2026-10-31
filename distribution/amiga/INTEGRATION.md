@@ -122,11 +122,26 @@ system's misleading volume requester. The integer-only `OpenRCT2Check`
 checks that the G1 header is readable and reports missing data without
 starting the game. This is a prerequisite check, not G1 format validation.
 
-The 0.14 open4 binary also has an FPU requirement in linked runtime code,
-despite application `-msoft-float` flags. Its `--version` path succeeds with
-an emulated 68060 FPU and fails without one. `OpenRCT2Check` inspects the OS
-FPU flags and reports this requirement before C++ static initialisation.
-This does not establish the cause of a particular user's crash. The native
-checker was tested with a missing G1, truncated G1, synthetic eight-byte
-path fixture, FPU present and FPU absent. No actual park/graphics test is
-claimed by these fixtures.
+The 0.14 open4 binary incorrectly selected FPU-dependent runtime archives,
+despite application `-msoft-float` flags. Requiring an FPU contradicted the
+port target. The 0.15 change keeps the application compiled for 68060 and
+selects the base 68000 software-float runtime for the final link, removing
+the FPU gate from `OpenRCT2Check`. An isolated 68060-compiled math/formatting
+smoke test failed when linked against the 68060 runtime and passed when
+linked against the base runtime, both with FPU emulation disabled.
+The original-data check is retained. Gameplay stability and memory footprint
+remain separate from this runtime fix.
+
+### No-FPU validation
+
+The final link rule must omit the application's CPU aliases entirely;
+appending `-m68000` after `-m68060` still selected libm060 with open4.
+With only the software-float runtime CPU at link time, both full native
+executables pass version/startup/shutdown tests under
+`volamos --cpu 68060 --no-fpu --dirty-heap --sanitize --ram 64M --stack 1M`.
+GUI help, the explicit floating-point math/format/parsing/shared-pointer
+regression, the core runtime probe, the allocator/static-lifetime test and
+the data checker also exit successfully. No FPSP emulation is enabled.
+These are runtime checks, not full GUI gameplay or native simulation parity.
+The original RCT2 data requirement and the 64 MB graphical-memory validation
+remain outstanding separately.

@@ -76,9 +76,24 @@ Debug switches (environment variables on the Amiga):
 - `OPENRCT2_ENTITY_DUMP=<file>`: dump the entity stream after `simulate`
   for cross-host comparison.
 
-### Current integration runtime prerequisite
-The supplied 0.14 open4 candidate requires an FPU in linked runtime code,
-even though application code is built with soft float. Enable the emulated
-68060 FPU in WinUAE. The launcher now runs the integer-only `OpenRCT2Check`
-helper before the game and requires an original `Data/G1.DAT`, separate
-from the included OpenRCT2 data. Build `openrct2` to produce both binaries.
+### No-FPU runtime selection (0.15)
+
+No FPU is required by the port target. With open4, compiling application
+code with `-m68060 -msoft-float` still selects prebuilt `libm060` runtime
+archives at link time. Those contain FPU instructions. Keep application
+compilation at 68060, but select the base software-float runtime using only
+`-m68000 -msoft-float` at final link time. Mixing the CPU aliases still
+selects libm060 with this driver, so the toolchain excludes compile FLAGS
+from the final executable link template. CRT/soft-float link settings are
+explicit through `AMIGA_RUNTIME_CPU_FLAGS`; the configure script also
+updates existing linker caches. Additional ABI or LTO flags need explicit
+link options when using this template.
+
+For a raw CMake invocation reusing an older build directory, explicitly set
+`-DCMAKE_EXE_LINKER_FLAGS="-m68000 -msoft-float -mcrt=nix20"`, or use a fresh
+build directory. `CMAKE_EXE_LINKER_FLAGS_INIT` only seeds new caches.
+
+The launcher keeps the original-data check and removes the FPU requirement.
+`openrct2-soft-float-test` exercises nonconstant floating-point math, numeric
+formatting/parsing, shared pointers and static destruction. Run it and the
+native allocator test with the emulated FPU disabled.
