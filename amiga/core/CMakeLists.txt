@@ -9,6 +9,9 @@ target_include_directories(openrct2-core-probe PRIVATE "${ROOT_DIR}/src")
 target_compile_definitions(openrct2-core-probe PRIVATE $<$<BOOL:${OPENRCT2_SMALL_MEMORY}>:OPENRCT2_SMALL_MEMORY>)
 
 if (AMIGA)
+    add_executable(openrct2-rle-zoom-test tests/rle_zoom.cpp
+        "${ROOT_DIR}/src/openrct2/drawing/Drawing.Sprite.RLE.cpp")
+    target_include_directories(openrct2-rle-zoom-test PRIVATE "${ROOT_DIR}/src")
     add_executable(openrct2-endian-wire-test tests/endian_wire.cpp)
     target_include_directories(openrct2-endian-wire-test PRIVATE "${ROOT_DIR}/src")
     if (OPENRCT2_SMALL_MEMORY)

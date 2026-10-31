@@ -260,3 +260,26 @@ rebuilt GUI version/startup/shutdown also pass. A real saved-file fixture
 stops at a volamos continuation-stub error; it is not a successful load or
 a diagnosed game failure, and full native import/simulation remains open.
 Graphical confirmation and full-game memory validation remain separate.
+
+### Magnified RLE sprites (0.19)
+
+The next WinUAE log and tester report confirm the title park and Electric
+Fields now load and run. The two closest zoom levels corrupt graphics.
+The RLE magnification path (-1/-2, or 2x/4x) copied the row offset directly
+into a native uint16_t, unlike the regular/minified path which explicitly
+decodes little-endian row offsets. Decode the two bytes explicitly in the
+magnification path too, retaining unaligned-data safety on m68k.
+
+The regression compiles the actual RLE renderer and compares its complete
+output buffer to an independent dense-pixel reference. Twenty-four cases
+cover 1x/2x/4x, clipped source coordinates, gaps, remap transparency, source
+and destination blending, a padded destination stride and untouched guard
+pixels. Row offsets exceed 255, have distinct high/low bytes and use an
+unaligned sprite base. The previous native renderer fails; the fixed
+renderer passes native no-FPU/dirty-heap/sanitizer and little-endian host
+runs. The rebuilt GUI version/startup/shutdown also passes. Real WinUAE
+visual confirmation at 2x/4x remains required.
+
+Memory remains above the original target: the tester's running game reports
+roughly 90-107 MiB of heap footprint before executable/OS costs. A 64 MB
+playable release is not established by the capacity profile or these tests.

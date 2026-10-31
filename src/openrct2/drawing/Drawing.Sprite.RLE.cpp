@@ -47,8 +47,8 @@ static void FASTCALL DrawRLESpriteMagnify(RenderTarget& rt, const DrawSpriteArgs
     {
         PaletteIndex* nextDst = dst + dstLineWidth;
         const int32_t rowNum = zoom.ApplyTo(srcY + y);
-        uint16_t lineOffset;
-        std::memcpy(&lineOffset, &imgData[rowNum * sizeof(uint16_t)], sizeof(uint16_t));
+        // RLE row offsets remain little-endian in sprite data on every host.
+        const uint16_t lineOffset = imgData[rowNum * 2] | (imgData[rowNum * 2 + 1] << 8);
         const uint8_t* data8 = imgData + lineOffset;
 
         bool lastDataForLine = false;
