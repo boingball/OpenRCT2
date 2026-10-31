@@ -8,6 +8,7 @@
  *****************************************************************************/
 
 #include "SawyerCoding.h"
+#include "../core/Endianness.h"
 
 #include "../core/Numerics.hpp"
 #include "SawyerChunk.h"
@@ -42,17 +43,23 @@ namespace OpenRCT2::SawyerCoding
         switch (chunkHeader.encoding)
         {
             case ChunkEncoding::none:
-                std::memcpy(dst_file, &chunkHeader, sizeof(ChunkHeader));
+            {
+                auto wireHeader = chunkHeader;
+                wireHeader.length = ToLittleEndian(wireHeader.length);
+                std::memcpy(dst_file, &wireHeader, sizeof(ChunkHeader));
                 dst_file += sizeof(ChunkHeader);
                 std::memcpy(dst_file, buffer, chunkHeader.length);
                 // fwrite(&chunkHeader, sizeof(ChunkHeader), 1, file);
                 // fwrite(buffer, 1, chunkHeader.length, file);
                 break;
+            }
             case ChunkEncoding::rle:
             {
                 auto encode_buffer = std::make_unique<uint8_t[]>(0x600000);
                 chunkHeader.length = static_cast<uint32_t>(EncodeChunkRLE(buffer, encode_buffer.get(), chunkHeader.length));
-                std::memcpy(dst_file, &chunkHeader, sizeof(ChunkHeader));
+                auto wireHeader = chunkHeader;
+                wireHeader.length = ToLittleEndian(wireHeader.length);
+                std::memcpy(dst_file, &wireHeader, sizeof(ChunkHeader));
                 dst_file += sizeof(ChunkHeader);
                 std::memcpy(dst_file, encode_buffer.get(), chunkHeader.length);
             }
@@ -64,7 +71,9 @@ namespace OpenRCT2::SawyerCoding
                 chunkHeader.length = static_cast<uint32_t>(EncodeChunkRepeat(buffer, encode_buffer.get(), chunkHeader.length));
                 chunkHeader.length = static_cast<uint32_t>(
                     EncodeChunkRLE(encode_buffer.get(), encode_buffer2.get(), chunkHeader.length));
-                std::memcpy(dst_file, &chunkHeader, sizeof(ChunkHeader));
+                auto wireHeader = chunkHeader;
+                wireHeader.length = ToLittleEndian(wireHeader.length);
+                std::memcpy(dst_file, &wireHeader, sizeof(ChunkHeader));
                 dst_file += sizeof(ChunkHeader);
                 std::memcpy(dst_file, encode_buffer2.get(), chunkHeader.length);
             }
@@ -74,7 +83,9 @@ namespace OpenRCT2::SawyerCoding
                 auto encode_buffer = std::make_unique<uint8_t[]>(chunkHeader.length);
                 std::memcpy(encode_buffer.get(), buffer, chunkHeader.length);
                 EncodeChunkRotate(encode_buffer.get(), chunkHeader.length);
-                std::memcpy(dst_file, &chunkHeader, sizeof(ChunkHeader));
+                auto wireHeader = chunkHeader;
+                wireHeader.length = ToLittleEndian(wireHeader.length);
+                std::memcpy(dst_file, &wireHeader, sizeof(ChunkHeader));
                 dst_file += sizeof(ChunkHeader);
                 std::memcpy(dst_file, encode_buffer.get(), chunkHeader.length);
             }
@@ -118,7 +129,7 @@ namespace OpenRCT2::SawyerCoding
 
         // Append checksum
         uint32_t checksum = CalculateChecksum(dst, encodedLength);
-        *(reinterpret_cast<uint32_t*>(&dst[encodedLength])) = checksum;
+        WriteLittleEndian<uint32_t>(&dst[encodedLength], checksum);
 
         return encodedLength + 4;
     }
@@ -141,7 +152,7 @@ namespace OpenRCT2::SawyerCoding
         }
         checksum -= 0x1D4C1;
 
-        *(reinterpret_cast<uint32_t*>(&dst[output_length])) = checksum;
+        WriteLittleEndian<uint32_t>(&dst[output_length], checksum);
         output_length += 4;
         return output_length;
     }
@@ -151,8 +162,7 @@ namespace OpenRCT2::SawyerCoding
     {
         if (length < 4)
             return 0;
-
-        uint32_t file_checksum = *(reinterpret_cast<const uint32_t*>(&src[length - 4]));
+        uint32_t file_checksum = ReadLittleEndian<uint32_t>(&src[length - 4]);
 
         uint32_t checksum = 0;
         for (size_t i = 0; i < length - 4; i++)

@@ -34,59 +34,20 @@ extern "C"
 }
 #endif
 
-static FILE* report;
+#include "diagnostic_output.h"
+
 static thread_local int threadLocalMarker = 0;
 
 // Do not use printf-family formatting here: open4's vfprintf saves FP
 // registers even for integer-only formats, defeating -msoft-float.
-static void print(const char* format, ...)
-{
-    char output[1024];
-    size_t used = 0;
-    auto put = [&](char c) { if (used + 1 < sizeof(output)) output[used++] = c; };
-    va_list args;
-    va_start(args, format);
-    while (*format)
-    {
-        if (*format != '%') { put(*format++); continue; }
-        ++format;
-        if (*format == '%') { put(*format++); continue; }
-        if (*format == 's')
-        {
-            const char* text = va_arg(args, const char*);
-            while (*text) put(*text++);
-            ++format;
-            continue;
-        }
-        unsigned width = 0;
-        while (*format >= '0' && *format <= '9') width = width * 10 + (*format++ - '0');
-        bool isLong = *format == 'l';
-        if (isLong) ++format;
-        const unsigned base = *format++ == 'x' ? 16 : 10;
-        unsigned long value = isLong ? va_arg(args, unsigned long) : va_arg(args, unsigned);
-        char digits[32];
-        unsigned count = 0;
-        do { digits[count++] = "0123456789abcdef"[value % base]; value /= base; } while (value);
-        while (width > count) { put('0'); --width; }
-        while (count) put(digits[--count]);
-    }
-    va_end(args);
-    output[used] = 0;
-    std::fputs(output, stdout);
-    std::fflush(stdout);
-    if (report != nullptr)
-    {
-        std::fputs(output, report);
-        std::fflush(report);
-    }
-}
-
 
 static void test_threads()
 {
     print("Thread stage: construct mutex\n");
     std::mutex mutex;
     int protectedCounter = 0;
+    const auto sharedValue = std::make_shared<int>(123);
+    std::atomic<int> sharedErrors{ 0 };
     std::atomic<int> completed{ 0 };
     std::atomic<int> onceCount{ 0 };
     std::once_flag once;
@@ -96,6 +57,8 @@ static void test_threads()
         threadLocalMarker = id;
         for (int i = 0; i < 1000; ++i)
         {
+            auto sharedCopy = sharedValue;
+            if (*sharedCopy != 123) sharedErrors.fetch_add(1);
             std::lock_guard<std::mutex> lock(mutex);
             ++protectedCounter;
         }
@@ -131,7 +94,7 @@ static void test_threads()
     condition.notify_one();
     waiter.join();
 
-    if (protectedCounter != 2000 || completed.load() != 2 || onceCount.load() != 1
+    if (sharedErrors.load() != 0 || sharedValue.use_count() != 1 || protectedCounter != 2000 || completed.load() != 2 || onceCount.load() != 1
         || threadLocalResults[0] != 1 || threadLocalResults[1] != 2
         || threadLocalMarker != 0 || !woke)
         throw std::runtime_error("C++ thread/mutex/condition-variable test failed");
@@ -140,9 +103,9 @@ static void test_threads()
 int main(int argc, char** argv)
 {
     using namespace OpenRCT2;
-    print("Probe 0.5: entered main (integer-only output)\n");
+    print("Probe 0.6: entered main (integer-only output)\n");
     report = std::fopen("OpenRCT2CoreProbe.txt", "w");
-    print("OpenRCT2 C++23 core ABI/runtime probe 0.5\n");
+    print("OpenRCT2 C++23 core ABI/runtime probe 0.6\n");
     print("This is a memory/runtime probe, not the park simulation.\n");
     print("Profile: %s\nPointer bits: %lu\n", MemoryProfile::kSmall ? "small-memory" : "standard",
         static_cast<unsigned long>(sizeof(void*) * 8));
@@ -168,6 +131,12 @@ int main(int argc, char** argv)
         print("Vector/sort/core RNG/endian checksum: %08lx\n", static_cast<unsigned long>(hash));
 
         print("Stage: exceptions\n");
+        auto shared = std::make_shared<int>(123);
+        auto copy = shared;
+        shared.reset();
+        if (*copy != 123 || copy.use_count() != 1) throw std::runtime_error("shared_ptr test failed");
+        copy.reset();
+        print("C++ shared_ptr copy/reset: PASS\n");
         bool exceptionCaught = false;
         try { throw std::runtime_error("probe"); }
         catch (const std::runtime_error&) { exceptionCaught = true; }

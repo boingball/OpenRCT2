@@ -10,6 +10,11 @@ on:
       - 'src/openrct2/world/MapLimits.h'
       - 'src/openrct2/park/ParkFile.cpp'
       - 'src/openrct2/rct2/S6Importer.cpp'
+      - 'src/openrct2/rct2/S6Header.h'
+      - 'src/openrct2/rct2/RCT2.h'
+      - 'src/openrct2/core/Endianness.h'
+      - 'src/openrct2/core/IStream.cpp'
+      - 'src/openrct2/sawyer_coding/**'
       - '.github/workflows/amiga-core.yml'
 jobs:
   compare-profiles:
@@ -69,10 +74,15 @@ jobs:
         run: |
           make -C amiga/core native test \
             AMIGA_CXX=/tmp/openamigagcc-16.2.0-open4-x86_64-linux/bin/m68k-amigaos-g++
+      - name: Verify save fixtures and corrupt inputs on host
+        run: python3 amiga/core/verify_save_probe.py amiga/core/build/save-probe-host
       - uses: actions/upload-artifact@v4
         with:
           name: Amiga-native-core-probes-open4
           path: |
             amiga/core/build/OpenRCT2CoreProbe
             amiga/core/build/OpenRCT2CoreProbe-Full
+            amiga/core/build/OpenRCT2SaveProbe
+            build/save-verification/*.log
+            build/save-verification/results.json
             amiga/core/README.md

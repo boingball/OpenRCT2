@@ -1,12 +1,85 @@
-# OpenRCT2 Amiga core investigation — milestone 0.5
+# OpenRCT2 Amiga core investigation — milestone 0.6
 
 The 0.1 graphics runner has passed the user's WinUAE RTG test with original G1
 graphics. This milestone tackles the **actual engine**, starting with memory,
 a real simulation benchmark on the host, and native C++ runtime probes.
 
 **There is no native Amiga park simulation executable yet.** The downloadable
-0.5 executables below are diagnostics. The 0.1 graphics runner remains the
+0.6 executables below are diagnostics. The 0.1 graphics runner remains the
 working RTG test.
+
+## Native save decoding milestone (0.6)
+
+The user confirmed baseline, ALLOCATE and THREADS all pass with probe 0.5
+in WinUAE. This milestone adds OpenRCT2SaveProbe, linking the engine's actual
+MemoryStream, SawyerChunkReader, SawyerChunkWriter and SawyerCoding sources.
+
+```text
+OpenRCT2SaveProbe
+OpenRCT2SaveProbe mypark.sv6
+OpenRCT2CoreProbe THREADS
+```
+
+No arguments runs fixed wire fixtures, all four compression encodings,
+unaligned little-endian scalar/checksum tests and corrupt-chunk rejection.
+A file argument additionally verifies the SV6/SC6 checksum, decodes the S6
+header fields and every chunk, and prints a fingerprint of the decoded bytes.
+Scenario-info and packed-object envelope traversal are supported. This is
+chunk decoding, not semantic park validation, object loading or game-state
+import. The input file is read only. OpenRCT2SaveProbe.txt is written in the
+current drawer; use a writable drawer.
+
+The file-size cap is 16 MiB and the decoded-chunk cap is the engine's 16 MiB.
+Extended Classic saves are rejected. No game data is required for self-tests;
+use an existing SV6/SC6 save to test real file decoding. Modern .park files
+are not supported by this probe. No park simulation is running yet.
+
+Production changes in this milestone:
+
+- Sawyer chunk reader/skip and all chunk encoders use little-endian lengths.
+- SV4/TD6 and stream-writer checksums use explicit little-endian, unaligned-safe
+  loads/stores instead of uint32_t pointer casts or native-order writes.
+- S6Header is extracted unchanged into its own lightweight engine header.
+- IStream::WriteString uses string_view directly instead of pulling in the
+  large String implementation; embedded-NUL behavior is tested and preserved.
+- The upstream big-endian Platform.h rejection remains intact. Whole legacy
+  structs, tile elements, Orca .park data and DataSerialiser still need audit.
+
+A further runtime problem was isolated with a tiny shared_ptr copy/reset test:
+open4's libstdc++ helper emits CAS.L for a reference count which may be aligned
+only to two bytes under this ABI. It succeeds in volamos's 68020/68040 modes
+and faults in 68060 mode. The diagnostic executables link amiga_atomics.cpp,
+which replaces the two libstdc++ reference-count arithmetic helpers using a
+tiny Exec Forbid/Permit task-context critical section, preserving the ABI.
+It performs no allocation/wait inside that section. This is for single-CPU
+AmigaOS task context, not interrupt callers or SMP, and does not repair every
+possible atomic operation in the runtime. No engine struct packing is changed.
+
+CoreProbe 0.6 now tests shared_ptr copy/reset by default and concurrent copies
+inside THREADS. The updated THREADS test needs WinUAE/real AmigaOS validation;
+volamos does not implement CreateNewProc. A previous THREADS pass on 0.5 does
+not establish concurrent shared_ptr correctness in 0.6.
+
+Verified on a little-endian host and volamos 68060 with FPU disabled/64 MiB RAM:
+
+| Input | Chunks | Decoded-byte fingerprint |
+| --- | ---: | --- |
+| bpb.sv6 | 5 | 08000478 |
+| small_park_car_ride_one_car.sv6 | 5 | 8e1dcc1d |
+| Synthetic scenario/packed-object envelope | 7 | 5ddb9d63 |
+
+Both architectures emit the four-encoding wire fingerprint b9cdc2a8 and reject
+bad checksums, truncated files and invalid lengths. These are byte-level
+compatibility results, not simulation fingerprints or 68060 performance data.
+The scenario envelope is synthetic and is not a playable park.
+
+```sh
+make -C amiga/core native test AMIGA_CXX=/path/to/m68k-amigaos-g++
+python3 amiga/core/verify_save_probe.py amiga/core/build/save-probe-host
+# Optional local 68060 emulator comparison (volamos executable required):
+python3 amiga/core/verify_save_probe.py amiga/core/build/save-probe-host \
+  --native amiga/core/build/OpenRCT2SaveProbe --emulator /path/to/volamos
+```
 
 ## Thread creation diagnostic update (0.5)
 

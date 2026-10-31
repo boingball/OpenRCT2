@@ -8,6 +8,7 @@
  *****************************************************************************/
 
 #include "SawyerChunkWriter.h"
+#include "../core/Endianness.h"
 
 #include "../core/IStream.hpp"
 #include "../core/Numerics.hpp"
@@ -55,6 +56,6 @@ namespace OpenRCT2::SawyerCoding
         checksum -= 0x1D4C1;
 
         _stream->Write(data.get(), dataLength);
-        _stream->WriteValue<uint32_t>(checksum);
+        _stream->WriteValue<uint32_t>(ToLittleEndian(checksum));
     }
 } // namespace OpenRCT2::SawyerCoding

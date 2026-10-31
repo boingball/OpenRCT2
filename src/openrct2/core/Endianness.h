@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
@@ -84,4 +85,31 @@ static T ByteSwapBE(const T& value)
         std::memcpy(&res, &result, sizeof(T));
         return res;
     }
+}
+
+// Scalar wire conversion. Keep ByteSwapBE's unconditional byte-reversal
+// semantics for compatibility with existing callers.
+template<typename T>
+static T ToLittleEndian(T value)
+{
+    static_assert(std::is_integral_v<T> || std::is_enum_v<T>);
+    if constexpr (std::endian::native == std::endian::big)
+        return ByteSwapBE(value);
+    else
+        return value;
+}
+
+template<typename T>
+static T ReadLittleEndian(const void* data)
+{
+    T value;
+    std::memcpy(&value, data, sizeof(value));
+    return ToLittleEndian(value);
+}
+
+template<typename T>
+static void WriteLittleEndian(void* data, T value)
+{
+    value = ToLittleEndian(value);
+    std::memcpy(data, &value, sizeof(value));
 }
