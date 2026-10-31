@@ -1,11 +1,11 @@
-# OpenRCT2 Amiga core investigation — milestone 0.2
+# OpenRCT2 Amiga core investigation — milestone 0.3
 
 The 0.1 graphics runner has passed the user's WinUAE RTG test with original G1
 graphics. This milestone tackles the **actual engine**, starting with memory,
 a real simulation benchmark on the host, and native C++ runtime probes.
 
 **There is no native Amiga park simulation executable yet.** The downloadable
-0.2 executables below are diagnostics. The 0.1 graphics runner remains the
+0.3 executables below are diagnostics. The 0.1 graphics runner remains the
 working RTG test.
 
 ## What changed
@@ -27,9 +27,10 @@ working RTG test.
   and park updates are the engine's own code, not the graphics runner's
   scripted crowd.
 - `OpenRCT2CoreProbe` is a native Amiga HUNK program compiled against the
-  actual core headers, with C++20, libnix and soft-float 68060 code generation.
-  It tests vector/sort, the engine RNG, byte swapping, exceptions and optional
-  memory allocation. It does not construct a working game or load a park.
+  actual core headers, with C++23, libnix, libpthread and soft-float 68060 code generation.
+  It tests vector/sort, the engine RNG, byte swapping, exceptions, real worker
+  threads, mutexes, condition variables, atomics, thread-local storage,
+  call_once and optional memory allocation. It does not construct a working game or load a park.
 
 The standard game profile retains its existing limits. Original data-file
 layouts and their legacy constants are not resized.
@@ -38,7 +39,7 @@ capacities are not advertised as compatible with normal multiplayer peers.
 
 ## Native 68k memory layout
 
-Measured by compiling the actual headers with AmigaPorts GCC 16.2-rc21:
+Measured by compiling the actual headers with OpenAmigaGCC 16.2.0-open4:
 
 | Structure | Standard profile | Small-memory profile |
 | --- | ---: | ---: |
@@ -79,11 +80,11 @@ These are verified build failures, rather than inferred performance problems:
    A direct native compilation of `GameState.cpp` hits it. This assertion
    remains intact. G1's explicit little-endian decoder in the 0.1 runner does
    not solve raw legacy save structs, map elements and other core formats.
-2. The downloaded AmigaPorts GCC 16.2-rc21 Linux release was configured with
-   `--enable-threads=no`. It has C++20 and exceptions, but no `std::mutex`
-   even with `-pthread`. Engine profiling, jobs, background work and object
-   loading currently require those types. A toolchain with a suitable C++
-   threading runtime, or a tested single-thread engine build, is needed.
+2. Threading is no longer a compiler dead-end: OpenAmigaGCC 16.2.0-open4
+   supplies libpthread and a C++23 POSIX-thread runtime. The new probe now
+   exercises thread creation/join, mutexes, condition variables, atomics,
+   thread-local storage and call_once. The actual test still needs to pass on
+   WinUAE/real AmigaOS before the engine can rely on it.
 3. Full engine platform integration and remaining library dependencies,
    including archive/compression and Unicode support, still need native work.
 
@@ -93,8 +94,9 @@ threading adaptation, then the genuine headless simulation on Amiga.
 
 ## Build native probes
 
-Use the AmigaPorts GCC 16.2 toolchain (with libnix and C++ headers), not a bare
-freestanding compiler without a C++ standard library:
+Use OpenAmigaGCC 16.2.0-open4 (with libnix, libpthread and libstdc++), not a
+bare freestanding compiler without a C++ standard library. The release is
+[available here](https://github.com/DalsinAI/openamigagcc/releases/tag/v16.2.0-open4):
 
 ```sh
 cd amiga/core
@@ -102,10 +104,12 @@ make native AMIGA_CXX=/path/to/toolchain/bin/m68k-amigaos-g++
 make test
 ```
 
-The probes run under volamos v0.14 with `--cpu 68060 --ram 64M --stack 256K`.
-The small-profile ALLOCATE test succeeds, with the same `8b751712` selected
-runtime checksum as the host. This validates those runtime operations and
-layout/allocation under emulation; it is not a hardware timing result.
+The probe is built with C++23 and links `-lpthread -latomic`. It deliberately
+uses no AmigaOS NDK headers, so this diagnostic can be built with the published
+open4 toolchain alone. The AmigaOS pthreads runtime must be present when running
+it. The small-profile ALLOCATE test checks the same 9,722,842-byte GameState
+reservation; the new thread tests verify real OS thread creation and joins.
+This is a runtime qualification test, not a park simulation or timing result.
 
 ## Build and run the real core benchmark
 

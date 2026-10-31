@@ -2,16 +2,17 @@ AMIGA_CXX ?= m68k-amigaos-g++
 HOST_CXX ?= c++
 BUILD ?= build
 ROOT = ../..
-FLAGS = -std=gnu++20 -O2 -fno-char8_t -I$(ROOT)/src
+FLAGS = -std=gnu++23 -O2 -I$(ROOT)/src -pthread
 AMIGA_FLAGS = -mcrt=nix20 -m68060 -msoft-float -pthread
+AMIGA_LIBS = -lm -lpthread -latomic
 .PHONY: all native host-probes test clean
 all: native
 $(BUILD):
 	mkdir -p $@
 $(BUILD)/OpenRCT2CoreProbe: probe.cpp $(ROOT)/src/openrct2/MemoryProfile.h | $(BUILD)
-	$(AMIGA_CXX) $(FLAGS) $(AMIGA_FLAGS) -MMD -MP -MF $@.d -DOPENRCT2_SMALL_MEMORY $< -o $@ -lm
+	$(AMIGA_CXX) $(FLAGS) $(AMIGA_FLAGS) -MMD -MP -MF $@.d -DOPENRCT2_SMALL_MEMORY $< -o $@ $(AMIGA_LIBS)
 $(BUILD)/OpenRCT2CoreProbe-Full: probe.cpp $(ROOT)/src/openrct2/MemoryProfile.h | $(BUILD)
-	$(AMIGA_CXX) $(FLAGS) $(AMIGA_FLAGS) -MMD -MP -MF $@.d $< -o $@ -lm
+	$(AMIGA_CXX) $(FLAGS) $(AMIGA_FLAGS) -MMD -MP -MF $@.d $< -o $@ $(AMIGA_LIBS)
 native: $(BUILD)/OpenRCT2CoreProbe $(BUILD)/OpenRCT2CoreProbe-Full
 $(BUILD)/probe-small: probe.cpp $(ROOT)/src/openrct2/MemoryProfile.h | $(BUILD)
 	$(HOST_CXX) $(FLAGS) -DOPENRCT2_SMALL_MEMORY $< -o $@

@@ -59,17 +59,19 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch pinned AmigaPorts compiler
+      - name: Fetch OpenAmigaGCC 16.2.0-open4
         run: |
-          curl -L --fail -o /tmp/amiga-gcc.tar.xz https://github.com/AmigaPorts/m68k-amigaos-gcc/releases/download/v16.2-rc21/m68k-amigaos-gcc-16.2-rc21-x86_64-linux.tar.xz
-          echo '45e9dc23db0915c05f957e2ba1356e8217b12d2276a09c6521329fe44f716c42  /tmp/amiga-gcc.tar.xz' | sha256sum -c -
-          mkdir /tmp/amiga-gcc
-          tar -xf /tmp/amiga-gcc.tar.xz -C /tmp/amiga-gcc
+          curl -fsSL --retry 4 --retry-delay 5 -o /tmp/openamigagcc.tar.xz \
+            https://github.com/DalsinAI/openamigagcc/releases/download/v16.2.0-open4/openamigagcc-16.2.0-open4-x86_64-linux.tar.xz
+          echo '495319a2ffd803278f8827cad70074029c7aa9ecbe05d037e8646ba43ab94ab2  /tmp/openamigagcc.tar.xz' | sha256sum -c -
+          tar -xJf /tmp/openamigagcc.tar.xz -C /tmp
       - name: Build native diagnostics and test host runtime
-        run: make -C amiga/core native test AMIGA_CXX=/tmp/amiga-gcc/m68k-amigaos-gcc-16.2/bin/m68k-amigaos-g++
+        run: |
+          make -C amiga/core native test \
+            AMIGA_CXX=/tmp/openamigagcc-16.2.0-open4-x86_64-linux/bin/m68k-amigaos-g++
       - uses: actions/upload-artifact@v4
         with:
-          name: Amiga-native-core-probes
+          name: Amiga-native-core-probes-open4
           path: |
             amiga/core/build/OpenRCT2CoreProbe
             amiga/core/build/OpenRCT2CoreProbe-Full
