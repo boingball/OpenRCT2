@@ -19,7 +19,16 @@ JobPool::TaskData::TaskData(std::function<void()> workFn, std::function<void()> 
 
 JobPool::JobPool(size_t maxThreads)
 {
+#if defined(__amigaos__) && !defined(OPENRCT2_AMIGA_THREADS)
+    // Thomas Luebker's tested inline path is the default on AmigaOS.
+    maxThreads = 0;
+#elif defined(__amigaos__)
+    // A single-core 68060 gains no CPU parallelism. Keep the experimental pool
+    // bounded; each worker reserves a 256 KiB stack via amiga_threads.cpp.
+    maxThreads = std::min<size_t>(maxThreads, 2);
+#else
     maxThreads = std::min<size_t>(maxThreads, std::max(1u, std::thread::hardware_concurrency()));
+#endif
     for (size_t n = 0; n < maxThreads; n++)
     {
         _threads.emplace_back(&JobPool::ProcessQueue, this);
@@ -43,6 +52,15 @@ JobPool::~JobPool()
 
 void JobPool::AddTask(std::function<void()> workFn, std::function<void()> completionFn)
 {
+#ifdef __amigaos__
+    if (_threads.empty())
+    {
+        workFn();
+        std::lock_guard lock(_mutex);
+        _completed.emplace_back(nullptr, completionFn);
+        return;
+    }
+#endif
     {
         std::lock_guard lock(_mutex);
         _pending.emplace_back(workFn, completionFn);

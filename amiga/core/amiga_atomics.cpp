@@ -14,13 +14,15 @@
 
 static inline void forbid()
 {
-    register void* execBase asm("a6") = *reinterpret_cast<void* volatile*>(4);
+    register void* execBase asm("a6");
+    asm volatile("move.l 4.w,%0" : "=r"(execBase) : : "memory");
     asm volatile("jsr -132(a6)" : "+r"(execBase) : : "d0", "d1", "a0", "a1", "cc", "memory");
 }
 
 static inline void permit()
 {
-    register void* execBase asm("a6") = *reinterpret_cast<void* volatile*>(4);
+    register void* execBase asm("a6");
+    asm volatile("move.l 4.w,%0" : "=r"(execBase) : : "memory");
     asm volatile("jsr -138(a6)" : "+r"(execBase) : : "d0", "d1", "a0", "a1", "cc", "memory");
 }
 

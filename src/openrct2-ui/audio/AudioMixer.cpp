@@ -272,6 +272,29 @@ size_t AudioMixer::ApplyResample(const void* srcBuffer, int32_t srcSamples, int3
     const int16_t* src = static_cast<const int16_t*>(srcBuffer);
     int16_t* dst = reinterpret_cast<int16_t*>(_effectBuffer.data());
 
+#ifdef OPENRCT2_AUDIO_FIXED_POINT
+    // 16.16 fixed-point linear interpolation: no floating point per sample (soft-float hosts).
+    const uint32_t step = static_cast<uint32_t>((static_cast<uint64_t>(inRate) << 16) / static_cast<uint32_t>(outRate));
+    uint32_t pos = 0;
+    for (int32_t i = 0; i < dstSamples; ++i, pos += step)
+    {
+        int32_t index = static_cast<int32_t>(pos >> 16);
+        int32_t frac = static_cast<int32_t>(pos & 0xFFFF);
+        if (index >= srcSamples - 1)
+        {
+            index = srcSamples - 2;
+            frac = 0x10000;
+        }
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            int32_t baseIndex = index * channels + ch;
+            int32_t s1 = src[baseIndex];
+            int32_t s2 = src[baseIndex + channels];
+            int32_t sample = s1 + (((s2 - s1) * frac) >> 16);
+            dst[i * channels + ch] = static_cast<int16_t>(std::clamp(sample, -32768, 32767));
+        }
+    }
+#else
     double ratio = static_cast<double>(inRate) / static_cast<double>(outRate);
 
     for (int32_t i = 0; i < dstSamples; ++i)
@@ -306,6 +329,7 @@ size_t AudioMixer::ApplyResample(const void* srcBuffer, int32_t srcSamples, int3
             dst[i * channels + ch] = static_cast<int16_t>(sample);
         }
     }
+#endif
 
     return dstSamples * bytesPerFrame;
 }
@@ -382,6 +406,25 @@ int32_t AudioMixer::ApplyVolume(const IAudioChannel* channel, void* buffer, size
 // TODO: investigate replacing this with OpenAL (#26035)
 void AudioMixer::EffectPanS16(const IAudioChannel* channel, int16_t* data, int32_t length)
 {
+#ifdef OPENRCT2_AUDIO_FIXED_POINT
+    // Volumes as 16.16 fixed point, ramped once per frame; integer maths only.
+    const int32_t n = length * 2;
+    if (n <= 0)
+        return;
+    int32_t volumeL = static_cast<int32_t>(channel->GetOldVolumeL() * 65536.0f);
+    int32_t volumeR = static_cast<int32_t>(channel->GetOldVolumeR() * 65536.0f);
+    const int32_t dL = static_cast<int32_t>((channel->GetVolumeL() - channel->GetOldVolumeL()) * 65536.0f)
+        / (length > 0 ? length : 1);
+    const int32_t dR = static_cast<int32_t>((channel->GetVolumeR() - channel->GetOldVolumeR()) * 65536.0f)
+        / (length > 0 ? length : 1);
+    for (int32_t i = 0; i < n; i += 2)
+    {
+        data[i + 0] = static_cast<int16_t>((static_cast<int32_t>(data[i + 0]) * (volumeL >> 4)) >> 12);
+        data[i + 1] = static_cast<int16_t>((static_cast<int32_t>(data[i + 1]) * (volumeR >> 4)) >> 12);
+        volumeL += dL;
+        volumeR += dR;
+    }
+#else
     const float dt = 1.0f / static_cast<float>(length * 2.0f);
     float volumeL = channel->GetOldVolumeL();
     float volumeR = channel->GetOldVolumeR();
@@ -395,6 +438,7 @@ void AudioMixer::EffectPanS16(const IAudioChannel* channel, int16_t* data, int32
         volumeL += d_left;
         volumeR += d_right;
     }
+#endif
 }
 
 // TODO: investigate replacing this with OpenAL (#26035)
@@ -418,6 +462,18 @@ void AudioMixer::EffectFadeS16(int16_t* data, int32_t length, int32_t startvolum
 {
     static_assert(SDL_MIX_MAXVOLUME == kMixerVolumeMax, "Max volume differs between OpenRCT2 and SDL2");
 
+#ifdef OPENRCT2_AUDIO_FIXED_POINT
+    // volume ramp in 16.16 fixed point (volumes are 0..128): integer maths only
+    if (length <= 0)
+        return;
+    int32_t vol = startvolume << 16;
+    const int32_t dvol = ((endvolume - startvolume) << 16) / length;
+    for (int32_t i = 0; i < length; i++)
+    {
+        data[i] = static_cast<int16_t>((static_cast<int32_t>(data[i]) * (vol >> 9)) >> 14); // /128 and /65536
+        vol += dvol;
+    }
+#else
     float startvolume_f = static_cast<float>(startvolume) / SDL_MIX_MAXVOLUME;
     float endvolume_f = static_cast<float>(endvolume) / SDL_MIX_MAXVOLUME;
     for (int32_t i = 0; i < length; i++)
@@ -425,6 +481,7 @@ void AudioMixer::EffectFadeS16(int16_t* data, int32_t length, int32_t startvolum
         float t = static_cast<float>(i) / length;
         data[i] = static_cast<int16_t>(data[i] * ((1.0f - t) * startvolume_f + t * endvolume_f));
     }
+#endif
 }
 
 // TODO: investigate replacing this with OpenAL (#26035)

@@ -9,6 +9,8 @@
 
 #include "Window.h"
 
+#include "../platform/Platform.h"
+
 #include "../Context.h"
 #include "../Game.h"
 #include "../Input.h"
@@ -75,6 +77,8 @@ static constexpr float kWindowScrollLocations[][2] = {
     static void WindowDrawSingle(
         Drawing::RenderTarget& rt, WindowBase& w, int32_t left, int32_t top, int32_t right, int32_t bottom);
 
+    WindowDrawStat gWindowDrawStat[256] = {};
+
     std::vector<std::unique_ptr<WindowBase>>::iterator WindowGetIterator(const WindowBase* w)
     {
         return std::find_if(gWindowList.begin(), gWindowList.end(), [w](auto&& w2) { return w == w2.get(); });
@@ -113,9 +117,20 @@ static constexpr float kWindowScrollLocations[][2] = {
 
     void WindowUpdateAllViewports()
     {
+#ifdef __amigaos__
+        // Amiga: a window viewport that follows a vehicle (ride window, guest window) repaints its whole view every
+        // frame the vehicle moves; on a 68k that view costs 20-30 ms. Move such viewports every other frame; the
+        // main viewport keeps its per-frame update.
+        static uint32_t frame = 0;
+        frame++;
+#endif
         WindowVisitEach([&](WindowBase* w) {
             if (w->viewport != nullptr && w->isVisible)
             {
+#ifdef __amigaos__
+                if (w->classification != WindowClass::mainWindow && !w->viewportTargetSprite.IsNull() && (frame & 1))
+                    return;
+#endif
                 ViewportUpdatePosition(w);
             }
         });
@@ -622,6 +637,7 @@ static constexpr float kWindowScrollLocations[][2] = {
 
         // Invalidate modifies the window colours so first get the correct
         // colour before setting the global variables for the string painting
+        const uint32_t tDraw = Platform::GetTicks();
         w.onPrepareDraw();
 
         // Text colouring
@@ -630,6 +646,9 @@ static constexpr float kWindowScrollLocations[][2] = {
         Drawing::gCurrentWindowColours[2] = w.colours[2].colour;
 
         w.onDraw(copy);
+        gWindowDrawStat[EnumValue(w.classification)].ms += Platform::GetTicks() - tDraw;
+        gWindowDrawStat[EnumValue(w.classification)].calls++;
+        gWindowDrawStat[EnumValue(w.classification)].pixels += static_cast<uint32_t>(copy.width) * static_cast<uint32_t>(copy.height);
     }
 
     bool isToolActive(WindowClass cls)

@@ -84,7 +84,7 @@ namespace OpenRCT2
                 uint64_t value{};
                 std::memcpy(&value, reinterpret_cast<const std::byte*>(buffer) + i, maxLen);
 
-                Step(value);
+                Step(IStream::LittleEndianToHost(value)); // little-endian by definition
             }
         }
 
@@ -125,10 +125,14 @@ namespace OpenRCT2
         {
             T value;
             std::memcpy(&value, buffer, sizeof(T));
-            Step(value);
+            // Fixed-size fast paths must hash the same little-endian-defined value as generic Write(),
+            // or the checksum diverges on a big-endian host for byte-identical input.
+            Step(IStream::LittleEndianToHost(value));
         }
 
         void Step(uint64_t value);
+        uint64_t LoadHash() const;
+        void StoreHash(uint64_t hash);
     };
 
 } // namespace OpenRCT2

@@ -8,7 +8,7 @@
  *****************************************************************************/
 
 #include "EntityRegistry.h"
-#include "EntitySpatialIndex.hpp"
+#include "../GameState.h"
 #include "../core/Algorithm.hpp"
 #include "../core/Guard.hpp"
 #include "../world/Location.hpp"
@@ -23,7 +23,7 @@ namespace OpenRCT2
 
     uint16_t EntityRegistry::getEntityListCount(EntityType type)
     {
-        return static_cast<uint16_t>(_entityLists[EnumValue(type)].size());
+        return static_cast<uint16_t>(gEntityLists[EnumValue(type)].size());
     }
 
     uint16_t EntityRegistry::getNumFreeEntities()
@@ -34,7 +34,16 @@ namespace OpenRCT2
     EntityBase* EntityRegistry::tryGetEntity(EntityId entityIndex)
     {
         const auto idx = entityIndex.ToUnderlying();
-        return idx >= kMaxEntities ? nullptr : &entities[idx].base;
+        if (idx >= kMaxEntities)
+        {
+            return nullptr;
+        }
+#ifdef __amigaos__
+        Entity_t* chunk = _entityChunks[idx >> kEntityChunkShift];
+        return chunk == nullptr ? nullptr : &chunk[idx & kEntityChunkMask].base;
+#else
+        return &entities[idx].base;
+#endif
     }
 
     EntityBase* EntityRegistry::getEntity(EntityId entityIndex)
@@ -49,12 +58,12 @@ namespace OpenRCT2
 
     const std::vector<EntityId>& EntityRegistry::getEntityTileList(const CoordsXY& spritePos)
     {
-        return _entitySpatialIndex[ComputeSpatialIndex(spritePos)];
+        return gEntitySpatialIndex[computeSpatialIndex(spritePos)];
     }
 
     void EntityRegistry::resetEntityLists()
     {
-        for (auto& list : _entityLists)
+        for (auto& list : gEntityLists)
         {
             list.clear();
         }
@@ -75,12 +84,26 @@ namespace OpenRCT2
 
     const std::list<EntityId>& EntityRegistry::getEntityList(const EntityType id)
     {
-        return _entityLists[EnumValue(id)];
+        return gEntityLists[EnumValue(id)];
     }
 
     void EntityRegistry::resetEntitySpatialIndices()
     {
-        for (auto& vec : _entitySpatialIndex)
+        // The only place the stride changes. Every entity is re-inserted below, so no stored index
+        // survives it. A map is square here; the larger side decides, and one spare row covers the
+        // null bucket.
+        const auto& mapSize = getGameState().mapSize;
+        const auto wanted = static_cast<uint32_t>(
+            std::clamp<int32_t>(std::max(mapSize.x, mapSize.y), 1, kMaximumMapSizeTechnical));
+        if (wanted != _spatialStride || gEntitySpatialIndex.size() != static_cast<size_t>(wanted) * wanted + 1)
+        {
+            // swap rather than assign: assign would keep the old buffer's capacity, which is the memory
+            // this is trying to give back.
+            std::vector<std::vector<EntityId>> fresh(static_cast<size_t>(wanted) * wanted + 1);
+            gEntitySpatialIndex.swap(fresh);
+            _spatialStride = wanted;
+        }
+        for (auto& vec : gEntitySpatialIndex)
         {
             vec.clear();
         }
@@ -109,7 +132,7 @@ namespace OpenRCT2
 
     void EntityRegistry::addToEntityList(EntityBase& entity)
     {
-        auto& list = _entityLists[EnumValue(entity.type)];
+        auto& list = gEntityLists[EnumValue(entity.type)];
 
         // Entity list is sorted by id to prevent desyncs.
         Algorithm::sortedInsert(list, entity.id);
@@ -144,7 +167,12 @@ namespace OpenRCT2
             return nullptr;
         }
 
+#ifdef __amigaos__
+        auto* slot = ensureChunkSlot(index.ToUnderlying());
+        auto* entity = slot == nullptr ? nullptr : &slot->base;
+#else
         auto* entity = getEntity(index);
+#endif
         if (entity == nullptr)
         {
             return nullptr;
@@ -158,13 +186,29 @@ namespace OpenRCT2
 
     void EntityRegistry::entitySpatialInsert(EntityBase& entity, const CoordsXY& newLoc)
     {
-        const auto newIndex = ComputeSpatialIndex(newLoc);
+        const auto newIndex = computeSpatialIndex(newLoc);
 
-        auto& spatialVector = _entitySpatialIndex[newIndex];
+        auto& spatialVector = gEntitySpatialIndex[newIndex];
 
         Algorithm::sortedInsert(spatialVector, entity.id);
 
         entity.spatialIndex = newIndex;
+    }
+
+    uint32_t EntityRegistry::computeSpatialIndex(const CoordsXY& loc) const
+    {
+        if (loc.isNull())
+            return spatialNullBucket();
+
+        // NOTE: The input coordinate is rotated and can have negative components.
+        const auto tileX = std::abs(loc.x) / kCoordsXYStep;
+        const auto tileY = std::abs(loc.y) / kCoordsXYStep;
+
+        const auto stride = static_cast<int32_t>(_spatialStride);
+        if (tileX >= stride || tileY >= stride)
+            return spatialNullBucket();
+
+        return static_cast<uint32_t>(tileX) * _spatialStride + static_cast<uint32_t>(tileY);
     }
 
     // For a freshly constructed, empty registry only. Existing populated
@@ -172,10 +216,11 @@ namespace OpenRCT2
     void EntityRegistry::initialiseEmptyStorage()
     {
         Guard::Assert(_freeIdList.empty(), "Entity storage has already been initialised");
-        for (const auto& list : _entityLists)
+        for (const auto& list : gEntityLists)
             Guard::Assert(list.empty(), "Cannot initialise populated entity storage");
-        for (const auto& bucket : _entitySpatialIndex)
+        for (const auto& bucket : gEntitySpatialIndex)
             Guard::Assert(bucket.empty(), "Cannot initialise populated spatial storage");
+#ifndef __amigaos__
         std::fill(std::begin(entities), std::end(entities), Entity_t());
         for (uint16_t i = 0; i < kMaxEntities; ++i)
         {
@@ -183,6 +228,9 @@ namespace OpenRCT2
             entities[i].base.id = EntityId::FromUnderlying(i);
             _entityFlashingList[i] = false;
         }
+#else
+        std::fill(std::begin(_entityFlashingList), std::end(_entityFlashingList), false);
+#endif
         resetFreeIds();
     }
 } // namespace OpenRCT2

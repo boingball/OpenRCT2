@@ -1,175 +1,155 @@
+> **68060 integration candidate:** See [the integration notes](distribution/amiga/INTEGRATION.md) for the constrained-memory profile, optional workers, provenance and validation limits.
 
+<p align="center"><img src="distribution/amiga/screenshots/title.png" width="640" alt="OpenRCT2 title screen on AmigaOS, 640x480, 8-bit RTG"></p>
 
-<p align="center">
-  <a href="https://openrct2.io">
-    <img src="https://raw.githubusercontent.com/OpenRCT2/OpenRCT2/develop/resources/logo/icon_x128.png" style="width: 128px;" alt="OpenRCT2 logo"/>
-  </a>
-</p>
+<h1 align="center">OpenRCT2 for AmigaOS (68k)</h1>
 
-<h1 align="center">OpenRCT2</h1>
+<p align="center">RollerCoaster Tycoon 2, running natively on a big-endian 68k Amiga.<br>
+A port of <a href="https://github.com/OpenRCT2/OpenRCT2">OpenRCT2</a> to AmigaOS 3.x — Picasso96/CyberGraphX display, Intuition input, AHI sound.</p>
 
-<h3 align="center">An open-source re-implementation of RollerCoaster Tycoon 2, a construction and management simulation video game that simulates amusement park management.</h3>
-
----
-
-![Still from the v0.5.0 title sequence](https://github.com/user-attachments/assets/fa893cc8-1484-4751-94be-4ead00a6c8f9)
-
+<p align="center"><a href="https://github.com/thomas-luebker/openrct2-amiga/releases"><b>Download the tester build</b></a> · <a href="distribution/amiga/TESTER-GUIDE.md">Tester guide</a> · <a href="distribution/amiga/BUILDING.md">Building</a> · <a href="AMIGA_PORT.md">How the port works</a></p>
 
 ---
 
-### Download
-| Latest release                                                                                                       | Latest development build |
-|----------------------------------------------------------------------------------------------------------------------|--------------------------|
-| [![OpenRCT2.io](https://img.shields.io/github/v/release/OpenRCT2/OpenRCT2.svg?color=green)](https://openrct2.io/download/release/latest) | [![OpenRCT2.io](https://img.shields.io/github/last-commit/OpenRCT2/OpenRCT2/develop?color=green)](https://openrct2.io/download/develop/latest) |
+## What this is
 
----
+OpenRCT2 is the open-source re-implementation of RollerCoaster Tycoon 2. This repository carries the
+`amiga` branch: the same engine cross-compiled for m68k AmigaOS 3.x with bebbo's GCC 16, no SDL, no
+threads, soft float, big-endian. It is a fork; upstream declined to merge it, so it lives here.
 
-### Chat
-Chat takes place on Discord. You will need to create a Discord account if you don't yet have one.
+| | |
+|---|---|
+| ![RCT1 Forest Frontiers](distribution/amiga/screenshots/rct1-forest-frontiers.png) | ![RCT2 Electric Fields](distribution/amiga/screenshots/rct2-electric-fields.png) |
+| RCT1 *Forest Frontiers* | RCT2 *Electric Fields* |
 
-If you want to help *make* the game, join the developer channel.
+## Status
 
-If you need help, want to talk to the developers, or just want to stay up to date then join the non-developer channel for your language.
+- **Plays.** RCT2 scenarios (`.sc6`, incl. Wacky Worlds / Time Twister) and RCT1 scenarios (`.sc4`,
+  incl. Added Attractions / Loopy Landscapes) load natively and play; `.park` saves load.
+- **Bit-exact.** The simulation produces the same entity checksums as the x86-64/arm64 build over
+  5000 ticks, and scenario loads are identical at tick 0 — verified on a 68040 against a native build
+  of the same tree.
+- **Display and input** on an 8-bit RTG screen (640×480 recommended), mouse and keyboard through
+  Intuition.
+- **Sound and music** through `ahi.device`: the RCT2 sound bank and `css*.dat` music. OpenRCT2's own
+  Ogg music packs are not supported (no Vorbis decoder in this build).
+- Not yet: networking, scripting. Mouse cursor shapes and the text clipboard work; the hardware-FPU
+  build runs but is no faster (see below).
+- **Current build: [test26](https://github.com/thomas-luebker/openrct2-amiga/releases/tag/test26)**
+  (September 2026). The port is in maintenance: no new test build is planned until a bug report
+  asks for one. Please report problems as a
+  [GitHub issue](https://github.com/thomas-luebker/openrct2-amiga/issues), with your machine, RAM,
+  OS version and the trace the [tester guide](distribution/amiga/TESTER-GUIDE.md) describes.
 
-If you want to help translate the game to your language, please stop by the Localisation channel.
+Known issues:
 
-| Language | Non Developer | Developer | Localisation | Asset Replacement |
-| -------- | ------------- | --------- | ------------ | ----------------- |
-| English | [![Discord](https://img.shields.io/badge/discord-%23openrct2--talk-blue.svg)](https://discord.gg/ZXZd8D8) </br> [![Discord](https://img.shields.io/badge/discord-%23help-blue.svg)](https://discord.gg/vJABqGGTEt) | [![Discord](https://img.shields.io/badge/discord-%23development-yellowgreen.svg)](https://discord.gg/fsEwSWs) | [![Discord](https://img.shields.io/badge/discord-%23localisation-green.svg)](https://discord.gg/sxnrvX9) | [![Discord](https://img.shields.io/badge/discord-%23open--graphics-b00b69.svg)](https://discord.gg/aM2Pchscnp) </br> [![Discord](https://img.shields.io/badge/discord-%23open--sound--and--music-b00b69.svg)](https://discord.gg/tuz3QBBWJf)
-| Nederlands | [![Discord](https://img.shields.io/badge/discord-%23nederlands-orange.svg)](https://discord.gg/cQYSXzW) | | |
+- On Heide Park (an RCT1 `.sc4` scenario) the cash field in the toolbar sometimes flickers to a
+  nonsense value between correct ones.
+- If text comes out garbled, start with `OPENRCT2_NO_BIGALLOC=1` set and say so in the report.
 
----
+## Performance
 
-# Contents
-- 1 - [Introduction](#1-introduction)
-- 2 - [Downloading the game (pre-built)](#2-downloading-the-game-pre-built)
-- 3 - [Building the game](#3-building-the-game)
-- 4 - [Contributing](#4-contributing)
-  - 4.1 - [Bug fixes](#41-bug-fixes)
-  - 4.2 - [New features](#42-new-features)
-  - 4.3 - [Translation](#43-translation)
-  - 4.4 - [Graphics](#44-graphics)
-  - 4.5 - [Audio](#45-audio)
-  - 4.6 - [Scenarios](#46-scenarios)
-- 5 - [Policies](#5-policies)
-  - 5.1 - [Code of conduct](#51-code-of-conduct)
-  - 5.2 - [Code signing policy](#52-code-signing-policy)
-  - 5.3 - [Privacy policy](#53-privacy-policy)
-- 6 - [Licence](#6-licence)
-- 7 - [More information](#7-more-information)
-- 8 - [Sponsors](#8-sponsors)
+Measured on real hardware, not estimated. A "normal park" is a freshly started scenario; the large
+park is a community one with 2,000 guests.
 
----
+Each park is loaded and the camera is never moved, so all three machines draw the same picture from the
+park's own saved viewpoint; the simulation is checked to be running before a frame is counted. The frame
+cap is 40.
 
-# 1. Introduction
+| | emulator (OS 3.2.3) | A1200 + PiStorm (Emu68) | A4000, 68060 @ 100 MHz |
+|---|---|---|---|
+| Crazy Castle, 3 guests | 35–38 fps | 39–40 fps | 36–37 fps |
+| Extreme Heights, 172 guests | 34–39 fps | 38–40 fps | 32–35 fps |
+| Heide Park, 2,085 guests | 15–16 fps | 16–18 fps | 2–3 fps |
+| loading any of them | 26–32 s | 27 s | 161–205 s |
 
-**OpenRCT2** is an open-source re-implementation of RollerCoaster Tycoon 2 (RCT2). The gameplay revolves around building and maintaining an amusement park containing attractions, shops and facilities. The player must try to make a profit and maintain a good park reputation whilst keeping the guests happy. OpenRCT2 allows for both scenario and sandbox play. Scenarios require the player to complete a certain objective in a set time limit whilst sandbox allows the player to build a more flexible park with optionally no restrictions or finance.
+The simulation on its own, measured headless with `openrct2-cli simulate` so no drawing is included, and
+with matching checksums across all three machines:
 
-RollerCoaster Tycoon 2 was originally written by Chris Sawyer in x86 assembly and is the sequel to RollerCoaster Tycoon. The engine was based on Transport Tycoon, an older game which also has an equivalent open-source project, [OpenTTD](https://openttd.org). OpenRCT2 attempts to provide everything from RCT2 as well as many improvements and additional features, some of these include support for modern platforms, an improved interface, improved guest and staff AI, more editing tools, increased limits, and cooperative multiplayer. It also re-introduces mechanics from RollerCoaster Tycoon that were not present in RollerCoaster Tycoon 2. Some of those include; mountain tool in-game, the *"have fun"* objective, launched coasters (not passing-through the station) and several buttons on the toolbar.
+| ms per tick | emulator | PiStorm | A4000 @ 100 MHz |
+|---|---|---|---|
+| Crazy Castle, 3 guests | 0.42 | 0.40 | 2.52 |
+| Extreme Heights, 172 guests | 2.33 | 1.67 | 17.82 |
+| Heide Park, 2,085 guests | 54.06 | 28.07 | 281.07 |
+| cost per guest per tick | 25.8 µs | 13.3 µs | 134 µs |
 
----
+A tick has to finish in 25 ms for the game to keep real time, which puts the PiStorm at roughly 1,800
+guests, the emulator at 950 and a 100 MHz 68060 at 180. **Emu68 recompiles 68k code to ARM rather than
+executing it, and is about ten times faster per guest than a real 68060 at twice its stock clock** —
+that gap, not the 68k clock, is what the columns are really comparing.
 
-# 2. Downloading the game (pre-built)
+> Measuring this is easy to get wrong. The wall clock of one `simulate` run is mostly loading objects,
+> so timing a single run measures the loader; the figures above are the slope between two tick counts.
+> A machine's first run on a park also builds the object and scenario indexes and reads 30–60 % high.
+> And a paused game draws at the frame cap while simulating nothing. All three produced confident,
+> wrong answers before the harness in `spike/mini/` was made to rule them out.
 
-OpenRCT2 requires original files of RollerCoaster Tycoon 2 to play. It can be bought at either [Steam](https://store.steampowered.com/app/285330/RollerCoaster_Tycoon_2_Triple_Thrill_Pack/) or [GOG.com](https://www.gog.com/game/rollercoaster_tycoon_2). If you have the original RollerCoaster Tycoon and its expansion packs, you can [point OpenRCT2 to these](https://github.com/OpenRCT2/OpenRCT2/wiki/Loading-RCT1-scenarios-and-data) in order to play the original scenarios.
+### How many guests will my machine take?
 
-[Our website](https://openrct2.io/download) offers portable builds and installers with the latest versions of the `master` and `develop` branches. There is also a [launcher](https://openrct2.io/download/launcher) available for Windows, macOS and Linux that will automatically update your build of the game so that you always have the latest version.
+This is the question that decides whether a park stays playable, and it has a straight answer,
+because the simulation cost is almost entirely the guests and it scales with how many there are.
+A tick has to fit in about 50 ms to feel alive:
 
-Alternatively to using the launcher, for most Linux distributions, we recommend the [latest Flatpak release](https://flathub.org/apps/details/io.openrct2.OpenRCT2). When downloading from Flathub, you will always receive the latest updates regardless of which Linux distribution you use.
+| machine | cost per guest per tick | keeps real time up to |
+|---|---|---|
+| 68060 at 100 MHz | 134 µs | **~180 guests** |
+| emulator (OS 3.2.3) | 25.8 µs | **~950 guests** |
+| PiStorm (Emu68) | 13.3 µs | **~1,800 guests**, though drawing then becomes the limit |
 
-Some Linux distributions offer native packages:
-* Arch Linux: [openrct2](https://archlinux.org/packages/extra/x86_64/openrct2/) latest release (`extra` repository) and, alternatively, [openrct2-git](https://aur.archlinux.org/packages/openrct2-git) (AUR)
-* Gentoo (main portage tree): [games-simulation/openrct2](https://packages.gentoo.org/packages/games-simulation/openrct2)
-* NixOS: [openrct2](https://github.com/NixOS/nixpkgs/blob/master/pkgs/by-name/op/openrct2/package.nix)
-* openSUSE OBS: [games/openrct2](https://software.opensuse.org/download.html?project=games&package=openrct2)
-* Ubuntu PPA (nightly builds): [`develop` branch](https://launchpad.net/~openrct2/+archive/ubuntu/nightly)
+Past that point the game does not stutter, it runs in **slow motion**: the port caps the ticks it will
+attempt per frame, so the picture stays smooth while the park's clock falls behind. A healthy frame rate
+on a crowded park is therefore not on its own proof that the machine is keeping up.
 
-Some \*BSD operating systems offer native packages:
-* FreeBSD: [games/openrct2](https://www.freshports.org/games/openrct2)
+Other things worth knowing:
 
----
+- **A normal park plays at the frame cap on every machine here**, which is what most people play.
+  Doubling a 68060's clock does not change that, because the frame loop rather than the processor is
+  the limit there.
+- **Doubling the clock doubles everything processor-bound** almost exactly: tick 2.07×, guest updates
+  2.1×. The copy to a Zorro graphics card improves only 1.5×, because the bus does not get faster.
+- **Rain costs a whole-screen copy every frame.** Free on a PiStorm, three quarters of the frame on a
+  Zorro card: set `render_weather_effects = false` in `user/config.ini` there.
+- **Where the time goes in a big park.** On a PiStorm with 2,070 guests, per frame in a built-up view:
+  about 35 ms of simulation and 15 ms of drawing. The tick is almost entirely the guests, the guests are
+  almost entirely walking, and **walking is about 80 % path finding** — 31 searches a tick, 229 tiles
+  examined per search. Inside the drawing, building the paint list is two thirds of it; the ground is
+  the largest single item there and the sprites the rest. The copy to the card is a quarter of a
+  millisecond on a PiStorm and 55 ms over Zorro.
+- **The simulation can be measured exactly.** `openrct2-cli simulate <park> <ticks>` runs a fixed park
+  for a fixed number of ticks with no drawing and prints a checksum, so a change can be timed the same
+  way twice. Two traps: the answer from a machine's *first* run on a park includes building the object
+  and scenario indexes and can be 60 % high, and `simulate` takes no command-line options, so the RCT2
+  path has to come from `user/OpenRCT2/config.ini`.
+- **Profiling on this hardware has to calibrate itself.** One system-clock read pair costs 20 µs on a
+  PiStorm, which is more than most of the things a probe measures, so the port measures that cost at
+  startup and subtracts it. Figures taken before that was done overstated everything.
+- **A hardware-FPU build buys nothing.** On a real 68060 with a 68882 it loaded 622 objects in 116 s
+  against 118 s for the soft-float build. The game keeps floating point out of its hot paths.
 
-# 3. Building the game
-- [Building OpenRCT2 on Linux](https://github.com/OpenRCT2/OpenRCT2/wiki/Building-OpenRCT2-on-Linux)
-- [Building OpenRCT2 on macOS using CMake](https://github.com/OpenRCT2/OpenRCT2/wiki/Building-OpenRCT2-on-macOS-using-CMake)
-- [Building OpenRCT2 on Windows](https://github.com/OpenRCT2/OpenRCT2/wiki/Building-OpenRCT2-on-Windows)
-- [Building OpenRCT2 on Windows Subsystem for Linux](https://github.com/OpenRCT2/OpenRCT2/wiki/Building-OpenRCT2-on-Windows-Subsystem-for-Linux)
-- [Building OpenRCT2 on MSYS2 MinGW](https://github.com/OpenRCT2/OpenRCT2/wiki/Building-OpenRCT2-on-MSYS2-MinGW)
+## Requirements
 
----
+- AmigaOS 3.2 (tested on 3.2.3); an RTG card with a Picasso96 or CyberGraphX driver and an 8-bit
+  640×480 mode (AGA/ECS-only machines are not supported).
+- 68040/68060, PiStorm (Emu68) or Vampire/Apollo. A 68020/030 runs it, slowly.
+- **Memory**: about **105 MB for a normal park** and **94 MB for Heide Park with 2,000 guests** —
+  both measured as memory held from the system, which is now within a megabyte of what the game is
+  actually using. A big park is not the expensive case; the object graphics a park pulls in are.
+  **128 MB of Fast RAM is enough**, which is the ceiling on most classic accelerators; autosave
+  briefly wants more, so set `autosave = 5` (never) in `user/config.ini` if memory is tight.
+- **Disk**: about 80 MB for the game, plus your RCT2 data (~150 MB, or ~630 MB with all the music).
+- AHI for sound (optional; silent without it).
+- The data files of the original RollerCoaster Tycoon 2 (GOG, Steam or CD). Not included.
 
-# 4. Contributing
-OpenRCT2 uses the [gitflow workflow](https://www.atlassian.com/git/tutorials/comparing-workflows#gitflow-workflow). If you are implementing a new feature or fixing a bug, please branch off and perform pull requests to ```develop```. ```master``` only contains tagged releases, you should never branch off this.
+See the [tester guide](distribution/amiga/TESTER-GUIDE.md) for installation.
 
-Please read our [contributing guidelines](https://github.com/OpenRCT2/OpenRCT2/blob/develop/CONTRIBUTING.md) for information.
+## Building
 
-## 4.1 Bug fixes
-A list of bugs can be found on the [issue tracker](https://github.com/OpenRCT2/OpenRCT2/issues). Feel free to work on any bug and submit a pull request to the develop branch with the fix. Mentioning that you intend to fix a bug on the issue will prevent other people from trying as well.
+Cross-compile on Linux or macOS: [distribution/amiga/BUILDING.md](distribution/amiga/BUILDING.md)
+covers the compiler, the four cross-built dependencies (`build-deps.sh`), `configure.sh` and packaging.
 
-## 4.2 New features
-Please talk to the OpenRCT2 team first before starting to develop a new feature. We may already have plans for or reasons against something that you'd like to work on. Therefore contacting us will allow us to help you or prevent you from wasting any time. You can talk to us via Discord, see links at the top of this page.
+## Credits and licence
 
-## 4.3 Translation
-You can translate the game into other languages by editing the language files in ```data/language``` directory. Please join discussions in the [#localisation channel on Discord](https://discordapp.com/invite/sxnrvX9) and submit pull requests to [OpenRCT2/Localisation](https://github.com/OpenRCT2/Localisation).
-
-## 4.4 Graphics
-You can help create new graphics for the game by visiting the [OpenGraphics project](https://github.com/OpenRCT2/OpenGraphics). 3D modellers needed!
-
-## 4.5 Audio
-You can help create the music and sound effects for the game. Check out the [OpenMusic](https://github.com/OpenRCT2/OpenMusic) repository and drop by our [#open-sound-and-music channel on Discord](https://discord.gg/9y8WbcX) to find out more.
-
-## 4.6 Scenarios
-We would also like to distribute additional scenarios with the game, when the time comes. For that, we need talented scenario makers! Check out the [OpenScenarios repository](https://github.com/PFCKrutonium/OpenRCT2-OpenScenarios).
-
----
-
-# 5. Policies
-
-## 5.1 Code of Conduct
-
-We have a [Code of Conduct](CODE_OF_CONDUCT.md) that applies to all OpenRCT2 projects. Please read it.
-
-## 5.2 Code signing policy
-
-We sign our releases with a digital certificate provided by SignPath Foundation.
-
-Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
-
-Signed releases can only be done by members of the [development team](https://github.com/OpenRCT2/OpenRCT2/blob/develop/contributors.md#development-team).
-
-## 5.3 Privacy policy
-
-See [PRIVACY.md](PRIVACY.md) for more information.
-
----
-
-# 6. Licence
-**OpenRCT2** is licensed under the GNU General Public License version 3 or (at your option) any later version. See the [`licence.txt`](licence.txt) file for more details.
-
----
-
-# 7. More information
-- [GitHub](https://github.com/OpenRCT2/OpenRCT2)
-- [OpenRCT2.io](https://openrct2.io)
-- [Facebook](https://www.facebook.com/OpenRCT2)
-- [RCT subreddit](https://www.reddit.com/r/rct/)
-- [OpenRCT2 subreddit](https://www.reddit.com/r/openrct2/)
-- OpenRCT2 plug-ins
-    - [Plug-in directory (unofficial)](https://openrct2plugins.org)
-    - [Plug-in development documentation](https://github.com/OpenRCT2/OpenRCT2/blob/develop/distribution/scripting/scripting.md)
-
-## Similar Projects
-
-| [OpenLoco](https://github.com/OpenLoco/OpenLoco) | [OpenTTD](https://github.com/OpenTTD/OpenTTD) | [openage](https://github.com/SFTtech/openage) | [OpenRA](https://github.com/OpenRA/OpenRA) |
-|:------------------------------------------------:|:----------------------------------------------------------------------------------------------------------:|:-------------------------------------------------------------------------------------------------------:|:-------------------------------------------------------------------------------------------------------------:|
-| [![icon_x128](https://user-images.githubusercontent.com/604665/53047651-2c533c00-3493-11e9-911a-1a3540fc1156.png)](https://github.com/OpenLoco/OpenLoco) | [![](https://github.com/OpenTTD/OpenTTD/raw/850d05d24d4768c81d97765204ef2a487dd4972c/media/openttd.128.png)](https://github.com/OpenTTD/OpenTTD) | [![](https://user-images.githubusercontent.com/550290/36507534-4693f354-175a-11e8-93a7-faa0481474fb.png)](https://github.com/SFTtech/openage) | [![](https://raw.githubusercontent.com/OpenRA/OpenRA/bleed/packaging/artwork/ra_128x128.png)](https://github.com/OpenRA/OpenRA) |
-| Chris Sawyer's Locomotion | Transport Tycoon Deluxe | Age of Empires 2 | Red Alert |
-
-# 8. Sponsors
-
-Companies that kindly allow us to use their stuff:
-
-| [JetBrains](https://www.jetbrains.com/)                                                                                                        | [Backtrace](https://backtrace.io/)                                                                                                        | [SignPath](https://signpath.org/)                                                                                  |
-|------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
-| [![jetbrains](https://github.com/user-attachments/assets/0d1cf25e-706d-4e3a-96ee-157fbf2cf0c0)](https://www.jetbrains.com/) | [![backtrace](https://user-images.githubusercontent.com/550290/47113259-d0647680-d258-11e8-97c3-1a2c6bde6d11.png)](https://backtrace.io/) | [![Image](https://github.com/user-attachments/assets/2b5679e0-76a4-4ae7-bb37-a6a507a53466)](https://signpath.org/) |
-| CLion and other products                                                                                                                       | Minidump uploads and inspection                                                                                                           | Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).                                                                                                       |
+OpenRCT2 is © the OpenRCT2 developers, GPLv3 — see [README.upstream.md](README.upstream.md),
+[contributors.md](contributors.md) and [licence.txt](licence.txt). RollerCoaster Tycoon 2 is © Chris Sawyer
+and Atari; you need your own copy. The AmigaOS port is by Thomas Lübker, developed with Claude Code;
+it is licensed under the same GPLv3.

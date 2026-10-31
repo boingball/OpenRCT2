@@ -28,6 +28,11 @@
 #include "actions/GameActionRunner.h"
 #include "audio/Audio.h"
 #include "audio/AudioContext.h"
+#include "platform/AmigaTrace.h"
+#ifdef __amigaos__
+// trace-gated frame profile: ms per 20 drawn frames spent in events, sleep, ticks, input+windows and draw
+static uint32_t gAmigaFrameStat[8] = {};
+#endif
 #include "config/Config.h"
 #include "core/BackgroundWorker.hpp"
 #include "core/Console.hpp"
@@ -80,6 +85,7 @@
 #include "world/MapSelection.h"
 #include "world/Park.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <exception>
@@ -138,6 +144,10 @@ namespace OpenRCT2
 
         Timer _timer;
         float _ticksAccumulator = 0.0f;
+#ifdef __amigaos__
+        // Rolling average cost of one simulation tick, in milliseconds. See amigaMaxTicksPerFrame().
+        uint32_t _amigaTickMsAvg = 0;
+#endif
         float _realtimeAccumulator = 0.0f;
         float _timeScale = 1.0f;
         bool _variableFrame = false;
@@ -351,6 +361,7 @@ namespace OpenRCT2
                 throw std::runtime_error("Context already initialised.");
             }
             _initialised = true;
+            AMIGA_TRACE_HEAP("context init entry");
 
             CrashInit();
 
@@ -409,12 +420,14 @@ namespace OpenRCT2
 
             // The repositories are all dependent on the RCT2 path being set,
             // so they cannot be set in the constructor.
+            AMIGA_TRACE_HEAP("before repositories created");
             _objectRepository = CreateObjectRepository(*_env);
             _objectManager = CreateObjectManager(*_objectRepository);
             _trackDesignRepository = CreateTrackDesignRepository(*_env);
             _scenarioRepository = CreateScenarioRepository(*_env);
             _sceneManager = createSceneManager(this);
 
+            AMIGA_TRACE_HEAP("after repositories created");
             if (!gOpenRCT2Headless)
             {
                 _assetPackManager = std::make_unique<AssetPackManager>();
@@ -540,6 +553,8 @@ namespace OpenRCT2
             auto currentLanguage = _localisationService->GetCurrentLanguage();
 
             OpenProgress(STR_CHECKING_OBJECT_FILES);
+            AMIGA_TRACE_HEAP("before object repository");
+            AMIGA_TRACE("init: object repository");
             _objectRepository->LoadOrConstruct(currentLanguage);
 
             // Asset packs need to be loaded before any of the objects they may override are.
@@ -554,16 +569,22 @@ namespace OpenRCT2
             }
 
             OpenProgress(STR_LOADING_GENERIC);
+            AMIGA_TRACE("init: audio objects");
             Audio::LoadAudioObjects();
 
+            AMIGA_TRACE("init: track designs");
             OpenProgress(STR_CHECKING_TRACK_DESIGN_FILES);
             _trackDesignRepository->Scan(currentLanguage);
+            AMIGA_TRACE("init: scenarios");
 
             OpenProgress(STR_CHECKING_SCENARIO_FILES);
             _scenarioRepository->Scan(currentLanguage);
 
             OpenProgress(STR_CHECKING_TITLE_SEQUENCES);
+            AMIGA_TRACE("init: title sequences");
             TitleSequenceManager::Scan();
+            AMIGA_TRACE("init: repositories done");
+            AMIGA_TRACE_HEAP("after repositories");
 
             OpenProgress(STR_LOADING_GENERIC);
         }
@@ -770,7 +791,9 @@ namespace OpenRCT2
                 OpenProgress(asScenario ? STR_LOADING_SCENARIO : STR_LOADING_SAVED_GAME);
                 SetProgress(0, 100, STR_STRING_M_PERCENT);
 
+                AMIGA_TRACE((std::string("park: load ") + path).c_str());
                 auto result = parkImporter->LoadFromStream(stream, info.Type == FileType::scenario, false, path.c_str());
+                AMIGA_TRACE("park: stream read, loading objects");
                 SetProgress(10, 100, STR_STRING_M_PERCENT);
 
                 // From this point onwards the currently loaded park will be corrupted if loading fails
@@ -784,7 +807,9 @@ namespace OpenRCT2
                 MapAnimations::ClearAll();
                 // TODO: Have a separate GameState and exchange once loaded.
                 auto& gameState = ::getGameState();
+                AMIGA_TRACE("park: objects loaded, importing");
                 parkImporter->Import(gameState);
+                AMIGA_TRACE("park: import done");
                 SetProgress(100, 100, STR_STRING_M_PERCENT);
 
                 // Reset viewport rendering inhibition
@@ -998,13 +1023,20 @@ namespace OpenRCT2
         // TODO: move function elsewhere?
         bool LoadBaseGraphics()
         {
+            AMIGA_TRACE_HEAP("before g1");
+            AMIGA_TRACE("init: loading g1");
             if (!GfxLoadG1(*_env))
             {
                 return false;
             }
+            AMIGA_TRACE("init: g1 loaded, loading g2/palettes/fonts/tracks");
+            AMIGA_TRACE_HEAP("after g1");
             GfxLoadG2PalettesFontsTracks();
+            AMIGA_TRACE("init: loading csg");
             GfxLoadCsg();
             FontSpriteInitialiseCharacters();
+            AMIGA_TRACE("init: base graphics loaded");
+            AMIGA_TRACE_HEAP("after base graphics");
             return true;
         }
 
@@ -1308,30 +1340,98 @@ namespace OpenRCT2
             }
         }
 
+#ifdef __amigaos__
+        /**
+         * How many simulation ticks may run before the next redraw.
+         *
+         * In a park with a couple of thousand guests one tick costs far more than a whole frame. The tick loops
+         * below would then run kGameMaxUpdates ticks back to back and draw once, so the picture, the mouse pointer
+         * and every window froze for the length of four ticks: a tester's 2,000-guest park drew about one frame per
+         * second. Drawing is cheap next to such a tick (5 ms against 35 ms in that park), so running fewer ticks per
+         * drawn frame costs almost no game speed while multiplying the frame rate. The simulation itself is
+         * untouched: every tick that runs is a whole, ordinary tick in the usual order, and the accumulator clamp in
+         * UpdateTimeAccumulators already decided how many of them real time allows.
+         *
+         * OPENRCT2_NO_TICKCAP=1 restores the plain upstream behaviour for comparison.
+         */
+        uint32_t amigaMaxTicksPerFrame() const
+        {
+            static const bool disabled = amiga_env_flag("OPENRCT2_NO_TICKCAP") != 0;
+            if (disabled || _amigaTickMsAvg <= 1)
+                return kGameMaxUpdates;
+            // Fast forward asks for more game time per real second, so it gets a proportionally larger budget.
+            const float budgetMs = kGameUpdateTimeMS * 1000.0f * std::max(_timeScale, 1.0f);
+            const uint32_t n = static_cast<uint32_t>(budgetMs / static_cast<float>(_amigaTickMsAvg));
+            return std::clamp<uint32_t>(n, 1u, kGameMaxUpdates);
+        }
+
+        void amigaNoteTickCost(uint32_t ms)
+        {
+            // A park load happens inside a tick and takes tens of seconds; that is not the cost of a tick, and
+            // letting it into the average would hold the cap at one for a while afterwards. Anything past half a
+            // second is over the cap's threshold many times over, so clamping there changes no decision.
+            _amigaTickMsAvg = (_amigaTickMsAvg * 3 + std::min(ms, 500u)) / 4;
+        }
+#endif
+
         void RunFixedFrame(float deltaTime)
         {
             PROFILED_FUNCTION();
 
+#ifdef __amigaos__
+            uint32_t s0 = Platform::GetTicks();
+#endif
             _uiContext->ProcessMessages();
+#ifdef __amigaos__
+            uint32_t s1 = Platform::GetTicks();
+            gAmigaFrameStat[0] += s1 - s0;
+#endif
 
             if (_ticksAccumulator < kGameUpdateTimeMS)
             {
                 const auto sleepTimeSec = std::min(kNetworkUpdateTimeMS, kGameUpdateTimeMS - _ticksAccumulator);
                 Platform::Sleep(static_cast<uint32_t>(sleepTimeSec * 1000.f));
+#ifdef __amigaos__
+                gAmigaFrameStat[1] += Platform::GetTicks() - s1;
+                gAmigaFrameStat[6]++;
+#endif
                 return;
             }
 
+#ifdef __amigaos__
+            uint32_t ticksThisFrame = 0;
+            const uint32_t maxTicksThisFrame = amigaMaxTicksPerFrame();
+#endif
             while (_ticksAccumulator >= kGameUpdateTimeMS)
             {
+#ifdef __amigaos__
+                const uint32_t tTick = Platform::GetTicks();
+#endif
                 Tick();
+#ifdef __amigaos__
+                amigaNoteTickCost(Platform::GetTicks() - tTick);
+                gAmigaFrameStat[7]++;
+#endif
 
                 _ticksAccumulator -= kGameUpdateTimeMS;
+#ifdef __amigaos__
+                // The rest of the accumulated time is kept, not dropped: it is spent by the following frames.
+                if (++ticksThisFrame >= maxTicksThisFrame)
+                    break;
+#endif
             }
+#ifdef __amigaos__
+            uint32_t s2 = Platform::GetTicks();
+            gAmigaFrameStat[2] += s2 - s1;
+#endif
 
             _backgroundWorker.dispatchCompleted();
 
             ContextHandleInput();
             WindowUpdateAll();
+#ifdef __amigaos__
+            gAmigaFrameStat[4] += Platform::GetTicks() - s2;
+#endif
 
             if (ShouldDraw())
             {
@@ -1348,19 +1448,33 @@ namespace OpenRCT2
 
             _uiContext->ProcessMessages();
 
+#ifdef __amigaos__
+            uint32_t ticksThisFrame = 0;
+            const uint32_t maxTicksThisFrame = amigaMaxTicksPerFrame();
+#endif
             while (_ticksAccumulator >= kGameUpdateTimeMS)
             {
                 // Get the original position of each sprite
                 if (shouldDraw)
                     tweener.preTick();
 
+#ifdef __amigaos__
+                const uint32_t tTick = Platform::GetTicks();
+#endif
                 Tick();
+#ifdef __amigaos__
+                amigaNoteTickCost(Platform::GetTicks() - tTick);
+#endif
 
                 _ticksAccumulator -= kGameUpdateTimeMS;
 
                 // Get the next position of each sprite
                 if (shouldDraw)
                     tweener.postTick();
+#ifdef __amigaos__
+                if (++ticksThisFrame >= maxTicksThisFrame)
+                    break;
+#endif
             }
 
             _backgroundWorker.dispatchCompleted();
@@ -1380,10 +1494,27 @@ namespace OpenRCT2
         void Draw()
         {
             PROFILED_FUNCTION();
+#ifdef __amigaos__
+            uint32_t d0 = Platform::GetTicks();
+#endif
 
             _drawingEngine->BeginDraw();
             _painter->Paint(*_drawingEngine);
             _drawingEngine->EndDraw();
+#ifdef __amigaos__
+            gAmigaFrameStat[3] += Platform::GetTicks() - d0;
+            if (++gAmigaFrameStat[5] % 20 == 0)
+            {
+                AMIGA_TRACE(String::stdFormat(
+                                "frame: per 20 draws: events %u ms, sleep %u ms (%u times), ticks %u ms (%u ticks), input+windows "
+                                "%u ms, draw %u ms",
+                                gAmigaFrameStat[0], gAmigaFrameStat[1], gAmigaFrameStat[6], gAmigaFrameStat[2], gAmigaFrameStat[7],
+                                gAmigaFrameStat[4], gAmigaFrameStat[3])
+                                .c_str());
+                for (auto& v : gAmigaFrameStat)
+                    v = 0;
+            }
+#endif
         }
 
         void Tick()
@@ -1561,7 +1692,10 @@ namespace OpenRCT2
 
     std::unique_ptr<IContext> CreateContext()
     {
-        return CreateContext(CreatePlatformEnvironment(), Audio::CreateDummyAudioContext(), CreateDummyUiContext());
+        auto env = CreatePlatformEnvironment();
+        auto audio = Audio::CreateDummyAudioContext();
+        auto ui = CreateDummyUiContext();
+        return CreateContext(std::move(env), std::move(audio), std::move(ui));
     }
 
     std::unique_ptr<IContext> CreateContext(

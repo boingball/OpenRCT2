@@ -10,6 +10,8 @@
 #include "GuestPathfinding.h"
 
 #include "../Diagnostic.h"
+#include "../config/Config.h"
+#include "../platform/AmigaTrace.h"
 #include "../GameState.h"
 #include "../core/Guard.hpp"
 #include "../entity/Guest.h"
@@ -49,6 +51,14 @@ namespace OpenRCT2::PathFinding
         int8_t junctionCount;
         int8_t maxJunctions;
         int32_t countTilesChecked;
+        // Memo of PathIsThinJunction per path element for the duration of one search: the map cannot change while a
+        // search runs, and a deep search re-enters the same junctions hundreds of times (each test walks up to four
+        // neighbouring tiles). Direct-mapped, keyed by the element's address.
+        struct ThinJunctionMemo
+        {
+            PathElement* element;
+            bool isThin;
+        } thinMemo[256];
         // TODO: Move them, those are query parameters not really state, but for now its easier to pass it down.
         bool ignoreForeignQueues;
         RideId queueRideIndex;
@@ -93,7 +103,14 @@ namespace OpenRCT2::PathFinding
                 return;
 
             char buffer[256];
+#if defined(__clang__)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wformat-security"
+#endif
             snprintf(buffer, sizeof(buffer), format, std::forward<TArgs>(args)...);
+#if defined(__clang__)
+    #pragma clang diagnostic pop
+#endif
 
             if (peep != nullptr)
             {
@@ -769,6 +786,7 @@ namespace OpenRCT2::PathFinding
             /* Look for all map elements that the peep could walk onto while
              * navigating to the goal, including the goal tile. */
 
+            gPathStat[10]++;
             if (tileElement->isGhost())
                 continue;
 
@@ -1047,7 +1065,43 @@ namespace OpenRCT2::PathFinding
             {
                 /* Check if this is a thin junction. And perform additional
                  * necessary checks. */
-                isThinJunction = PathIsThinJunction(tileElement->asPath(), loc);
+                {
+                    PathElement* pathElement = tileElement->asPath();
+                    // A TileElement is 16 bytes, so shifting by 4 gives one memo slot per element. Shifting
+                    // by 3, as this did, stepped two slots per element and used only the even half of the
+                    // table -- half the memo, and twice the collisions, for the same 2 KB.
+                    auto& memo = state.thinMemo[(reinterpret_cast<uintptr_t>(pathElement) >> 4) & 255];
+#ifdef __amigaos__
+                    static const bool noMemo = amiga_env_flag("OPENRCT2_NO_THINMEMO") != 0; // parity experiments
+#else
+                    constexpr bool noMemo = false;
+#endif
+                    if (!noMemo && memo.element == pathElement)
+                    {
+                        isThinJunction = memo.isThin;
+                    }
+                    else
+                    {
+#ifdef __amigaos__
+                        if (amiga_trace_enabled())
+                        {
+                            const unsigned tThin = amiga_ticks_us();
+                            isThinJunction = PathIsThinJunction(pathElement, loc);
+                            gPathStat[8]++;
+                            gPathStat[9] += amiga_ticks_us() - tThin;
+                        }
+                        else
+                        {
+                            isThinJunction = PathIsThinJunction(pathElement, loc);
+                        }
+#else
+                        isThinJunction = PathIsThinJunction(pathElement, loc);
+#endif
+                        memo.element = pathElement;
+                        memo.isThin = isThinJunction;
+                    }
+                    gPathStat[11]++;
+                }
 
                 if (isThinJunction)
                 {
@@ -1221,6 +1275,14 @@ namespace OpenRCT2::PathFinding
      *
      *  rct2: 0x0069A5F0
      */
+    // trace profile (AmigaOS): [0] CalculateNextDestination calls, [1] its microseconds, [2] edge searches, [3] tiles checked
+    uint32_t gPathStat[12] = {}; // [8] thin-junction tests, [9] their microseconds, [10] tile elements iterated, [11] junctions visited // [4] searches that exhausted their tile budget, [5] tiles checked by those,
+                                // [6] ChooseDirection calls whose (tile, goal, junction limit) was seen within 8 ticks, [7] calls
+#ifdef __amigaos__
+    static uint32_t sRecentKeys[1024];
+    static uint32_t sRecentTicks[1024];
+#endif
+
     Direction ChooseDirection(
         const TileCoordsXYZ& loc, const TileCoordsXYZ& goal, Peep& peep, bool ignoreForeignQueues, RideId queueRideIndex)
     {
@@ -1233,10 +1295,27 @@ namespace OpenRCT2::PathFinding
 
         // The max number of thin junctions searched - a per-search-path limit.
         state.maxJunctions = PeepPathfindGetMaxNumberJunctions(peep);
+#ifdef __amigaos__
+        {
+            // trace experiment: would a short-lived cache of search results hit?
+            const uint32_t key = (static_cast<uint32_t>(loc.x) * 73856093u) ^ (static_cast<uint32_t>(loc.y) * 19349663u)
+                ^ (static_cast<uint32_t>(loc.z) * 83492791u) ^ (static_cast<uint32_t>(goal.x) * 2654435761u)
+                ^ (static_cast<uint32_t>(goal.y) * 40503u) ^ (static_cast<uint32_t>(goal.z) * 97u)
+                ^ (static_cast<uint32_t>(state.maxJunctions) * 7u) ^ (ignoreForeignQueues ? 0x5555u : 0u)
+                ^ (queueRideIndex.ToUnderlying() * 131u);
+            const uint32_t tick = getGameState().currentTicks;
+            const uint32_t slot = key & 1023;
+            gPathStat[7]++;
+            if (sRecentKeys[slot] == key && tick - sRecentTicks[slot] <= 8)
+                gPathStat[6]++;
+            sRecentKeys[slot] = key;
+            sRecentTicks[slot] = tick;
+        }
+#endif
 
         /* The max number of tiles to check - a whole-search limit.
          * Mainly to limit the performance impact of the path finding. */
-        int32_t maxTilesChecked = (peep.is<Staff>()) ? 50000 : 15000;
+        int32_t maxTilesChecked = (peep.is<Staff>()) ? 50000 : std::max(500, Config::Get().general.pathfindTileBudget);
 
         LogPathfinding(&peep, "Choose direction for goal %d,%d,%d from %d,%d,%d", goal.x, goal.y, goal.z, loc.x, loc.y, loc.z);
 
@@ -1455,6 +1534,13 @@ namespace OpenRCT2::PathFinding
                 PeepPathfindHeuristicSearch(
                     state, { loc.x, loc.y, height }, goal, peep, firstTileElement, inPatrolArea, 0, &score, testEdge,
                     &endJunctions, endJunctionList, endDirectionList, &endXYZ, &endSteps);
+                gPathStat[2]++;
+                gPathStat[3] += static_cast<uint32_t>(maxTilesChecked / numEdges - state.countTilesChecked);
+                if (state.countTilesChecked <= 0)
+                {
+                    gPathStat[4]++;
+                    gPathStat[5] += static_cast<uint32_t>(maxTilesChecked / numEdges);
+                }
 
                 if constexpr (kLogPathfinding)
                 {
@@ -1875,6 +1961,21 @@ namespace OpenRCT2::PathFinding
     int32_t CalculateNextDestination(Guest& peep)
     {
         LogPathfinding(&peep, "Starting CalculateNextDestination");
+#ifdef __amigaos__
+        // Clock reads are expensive on real hardware, so the profile only runs while a trace is written.
+        struct PathTimer
+        {
+            const bool profile = amiga_trace_enabled() != 0;
+            unsigned t0 = profile ? amiga_ticks_us() : 0u;
+            ~PathTimer()
+            {
+                if (!profile)
+                    return;
+                gPathStat[0]++;
+                gPathStat[1] += amiga_ticks_us() - t0;
+            }
+        } pathTimer;
+#endif
 
         if (peep.getNextIsSurface())
         {

@@ -13,6 +13,8 @@
 #include "../Diagnostic.h"
 #include "../GameState.h"
 #include "../OpenRCT2.h"
+#include "../platform/AmigaTrace.h"
+#include "../platform/Platform.h"
 #include "../config/Config.h"
 #include "../core/Guard.hpp"
 #include "../core/JobPool.h"
@@ -438,6 +440,15 @@ namespace OpenRCT2
             if (left >= right || top >= bottom)
                 continue;
 
+#ifdef __amigaos__
+            if (amiga_paint_log_armed && amiga_env_flag("OPENRCT2_PAINT_LOG"))
+            {
+                AMIGA_TRACE((std::string("shift: transparent window class ") + std::to_string(static_cast<int>(w->classification))
+                             + " flags " + std::to_string(w->flags.holder) + " redraw " + std::to_string(left) + "," + std::to_string(top)
+                             + " " + std::to_string(right - left) + "x" + std::to_string(bottom - top))
+                                .c_str());
+            }
+#endif
             WindowDrawAll(rt, left, top, right, bottom);
         }
 
@@ -835,12 +846,17 @@ namespace OpenRCT2
         ViewportPaint(viewport, rt);
     }
 
+    static uint32_t sArrangeMs = 0; // trace: share of ViewportFillColumn spent sorting
+    uint32_t gViewportPaintStat[5] = { 0, 0, 0, 0, 0 };
+
     static void ViewportFillColumn(PaintSession& session)
     {
         PROFILED_FUNCTION();
 
         PaintSessionGenerate(session);
+        const uint32_t t = Platform::GetTicks();
         PaintSessionArrange(session);
+        sArrangeMs += Platform::GetTicks() - t;
     }
 
     static void ViewportPaintColumn(PaintSession& session)
@@ -926,6 +942,9 @@ namespace OpenRCT2
         const int32_t rightBorder = worldRT.x + worldRT.width;
         const int32_t alignedX = floor2(worldRT.x, columnWidth);
 
+        // Trace-gated paint profile (paints, generate ms, sort ms, draw ms, columns); printed with the gfx line.
+        const uint32_t tFill = Platform::GetTicks();
+
         // Generate and sort columns.
         for (int32_t x = alignedX; x < rightBorder; x += columnWidth)
         {
@@ -974,6 +993,7 @@ namespace OpenRCT2
         {
             _paintJobs->Join();
         }
+        const uint32_t tDraw = Platform::GetTicks();
 
         // Paint columns.
         for (auto* session : _paintColumns)
@@ -991,6 +1011,38 @@ namespace OpenRCT2
         {
             _paintJobs->Join();
         }
+#ifdef __amigaos__
+        {
+            // OPENRCT2_PAINT_LOG: one trace line per viewport paint (rect, columns, ms) for the first 600 paints.
+            static const bool logPaints = amiga_env_flag("OPENRCT2_PAINT_LOG") != 0;
+            static uint32_t logged = 0;
+            if (logPaints && amiga_paint_log_armed && logged < 400)
+            {
+                logged++;
+                AMIGA_TRACE((std::string("paint: rect ") + std::to_string(rt.x) + "," + std::to_string(rt.y) + " "
+                             + std::to_string(rt.width) + "x" + std::to_string(rt.height) + " cols "
+                             + std::to_string(_paintColumns.size()) + " gen " + std::to_string(tDraw - tFill) + " draw "
+                             + std::to_string(Platform::GetTicks() - tDraw) + " ms")
+                                .c_str());
+            }
+        }
+#endif
+        gViewportPaintStat[0]++;
+        gViewportPaintStat[1] += tDraw - tFill - sArrangeMs;
+        gViewportPaintStat[2] += sArrangeMs;
+        gViewportPaintStat[3] += Platform::GetTicks() - tDraw;
+        gViewportPaintStat[4] += static_cast<uint32_t>(_paintColumns.size());
+        sArrangeMs = 0;
+#ifdef __amigaos__
+        {
+            static bool init = false;
+            if (!init)
+            {
+                init = true;
+                gPaintProfEnabled = amiga_env_flag("OPENRCT2_PAINT_PROF") != 0;
+            }
+        }
+#endif
 
         // Release resources.
         for (auto* session : _paintColumns)
@@ -1771,6 +1823,76 @@ namespace OpenRCT2
         }
         invalidRect.point1 += viewportScreenPos;
         invalidRect.point2 += viewportScreenPos;
+#ifdef __amigaos__
+        if (Config::Get().general.solidWindows)
+        {
+            // Nothing behind an opaque window can show, so a moving guest under the scenario window must not cost
+            // a repaint of the window (6 ms on a 68k): subtract the opaque windows above this viewport's window.
+            WindowBase* owner = nullptr;
+            for (auto& wp : gWindowList)
+            {
+                if (wp->viewport == viewport && !wp->flags.has(WindowFlag::dead))
+                {
+                    owner = wp.get();
+                    break;
+                }
+            }
+            if (owner != nullptr)
+            {
+                // Every guest that moves inside the view lands here twice, so the rectangle list is kept on the
+                // stack: the std::vector version allocated once per piece list and once more per window above,
+                // which on a 68k cost more than the repaint it saves. 32 pieces can each split into four, hence 128.
+                constexpr size_t kMaxPieces = 32;
+                constexpr size_t kCapacity = kMaxPieces * 4;
+                ScreenRect bufA[kCapacity];
+                ScreenRect bufB[kCapacity];
+                ScreenRect* pieces = bufA;
+                ScreenRect* next = bufB;
+                size_t nPieces = 1;
+                pieces[0] = invalidRect;
+
+                auto it = std::next(WindowGetIterator(owner));
+                for (; it != gWindowList.end() && nPieces < kMaxPieces; ++it)
+                {
+                    const auto* w = it->get();
+                    if (w->flags.has(WindowFlag::dead) || w->flags.has(WindowFlag::transparent) || !w->isVisible)
+                        continue;
+                    const ScreenRect wr = { w->windowPos, w->windowPos + ScreenCoordsXY{ w->width, w->height } };
+                    size_t nNext = 0;
+                    for (size_t i = 0; i < nPieces; i++)
+                    {
+                        const ScreenRect& r = pieces[i];
+                        if (r.getRight() <= wr.getLeft() || r.getLeft() >= wr.getRight() || r.getBottom() <= wr.getTop()
+                            || r.getTop() >= wr.getBottom())
+                        {
+                            next[nNext++] = r;
+                            continue;
+                        }
+                        // strips of r outside wr: above, below, left, right
+                        if (r.getTop() < wr.getTop())
+                            next[nNext++] = { r.point1, { r.getRight(), wr.getTop() } };
+                        if (r.getBottom() > wr.getBottom())
+                            next[nNext++] = { { r.getLeft(), wr.getBottom() }, r.point2 };
+                        const int32_t midTop = std::max(r.getTop(), wr.getTop());
+                        const int32_t midBottom = std::min(r.getBottom(), wr.getBottom());
+                        if (r.getLeft() < wr.getLeft())
+                            next[nNext++] = { { r.getLeft(), midTop }, { wr.getLeft(), midBottom } };
+                        if (r.getRight() > wr.getRight())
+                            next[nNext++] = { { wr.getRight(), midTop }, { r.getRight(), midBottom } };
+                    }
+                    std::swap(pieces, next);
+                    nPieces = nNext;
+                }
+                for (size_t i = 0; i < nPieces; i++)
+                {
+                    const ScreenRect& r = pieces[i];
+                    if (r.getRight() > r.getLeft() && r.getBottom() > r.getTop())
+                        GfxSetDirtyBlocks(r);
+                }
+                return;
+            }
+        }
+#endif
         GfxSetDirtyBlocks(invalidRect);
     }
 

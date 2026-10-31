@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <cstring>
 
+extern "C" int __wrap_snprintf(char*, size_t, const char*, ...);
+
 // open4's pthread_create uses this exact format before launching a worker.
 // Keep that integer-only operation out of libnix's FPU formatter. All other
 // snprintf calls retain their normal semantics through vsnprintf.
