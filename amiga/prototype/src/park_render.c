@@ -66,7 +66,7 @@ int runner_set_map(Runner *r,const void *data,uint32_t size) {
     a=park_map_offset(&r->map,(r->map.side/2)*(r->map.side+1));
     b=park_map_offset(&r->map,(r->map.side/2)*(r->map.side+1)+1);
     while(a<b){const uint8_t *p=r->map.records+a++*PARK_MAP_RECORD;if(!p[0])r->map_base=p[1];}
-    r->map_tracks_visible=1;r->map_ride_selected=-1;r->map_guests_visible=1;r->guests=0;r->atlas=0;r->pan_x=r->pan_y=0;r->full_redraw=1;
+    r->map_guest_sprites=1;r->map_tracks_visible=1;r->map_ride_selected=-1;r->map_guests_visible=1;r->guests=0;r->atlas=0;r->pan_x=r->pan_y=0;r->full_redraw=1;
     return 1;
 }
 void runner_map_background(Runner *r,Canvas *c) {
@@ -154,6 +154,13 @@ void runner_map_background(Runner *r,Canvas *c) {
             // Riding/picked guests are not visible walking positions. Markers
             // are deliberately diagnostic; no invented animation or movement.
             if(g[9]==3||g[9]==9)continue;
+            // Only the normal legacy walking group is mapped for now, using
+            // a fixed neutral frame. Unsupported poses/groups stay markers.
+            if(r->map_guest_sprites && r->g1.count && g[13]==0
+                && (g[9]==5 || g[9]==6 || g[9]==13 || g[9]==14)) {
+                if(g1_draw_guest(&r->g1,6409u+(unsigned)dir,c,gx,gy,(unsigned)r->map_zoom,g[11],g[12])) {r->blits++;continue;}
+                r->rejected++;
+            }
             runner_fill(c,gx-width/2,gy-height,width,height,g[10]?5:4);
             runner_fill(c,gx,gy-height,1,1,3);
             line(c,(Point){gx,gy},(Point){gx+dx[dir]*2,gy+dy[dir]},3);

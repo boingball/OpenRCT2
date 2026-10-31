@@ -18,9 +18,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install compiler and CPU emulator
-        run: sudo apt-get update && sudo apt-get install -y gcc-m68k-linux-gnu binutils-m68k-linux-gnu libc6-dev-m68k-cross qemu-user
+        run: sudo apt-get update && sudo apt-get install -y gcc-m68k-linux-gnu binutils-m68k-linux-gnu libc6-dev-m68k-cross qemu-user python3-pil
       - name: Host and sanitizer checks
-        run: make test test-asan
+        run: python3 tools/guest_palette.py --check && make test test-asan
       - name: Native HUNK build and 68060 checks
         run: make amiga test-68k check-060
       - name: Package runner

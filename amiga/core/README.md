@@ -1,4 +1,4 @@
-# OpenRCT2 Amiga core investigation — milestone 0.10
+# OpenRCT2 Amiga core investigation — milestone 0.11
 
 The 0.1 graphics runner has passed the user's WinUAE RTG test with original G1
 graphics. This milestone tackles the **actual engine**, starting with memory,
@@ -7,6 +7,22 @@ a real simulation benchmark on the host, and native C++ runtime probes.
 **There is no native Amiga park simulation executable yet.** The downloadable
 import executables below are diagnostics. The 0.8 viewer displays their
 terrain/path export through the existing RTG backend.
+
+## Optional saved-guest sprite view (0.11)
+
+The viewer can use an original RCT2 G1 file for normal walking-group guests,
+with both saved clothing colours and the saved direction at all four zoom
+levels. It uses a fixed neutral frame, not the saved action/animation frame.
+Other groups/poses and invalid/missing sprites fall back to diagnostic markers;
+`MARKERS` forces markers. No guest movement or simulation is introduced.
+The importer remains at 0.10 and the AMAP v3 format is unchanged.
+
+See [viewer instructions](../prototype/README.md). This decoder passes host
+ASan/UBSan, independent bitmap/RLE references and bare 68060 tests. The native
+HUNK's G1 loading, RTG viewport and cleanup match host rendering using synthetic
+guest test images, including both colour remaps. The exact original G1 guest
+artwork and real WinUAE/P96/CGX validation remain outstanding. No original game
+art is bundled or represented by the synthetic test fixture.
 
 ## Ride catalogue and track footprints (0.10)
 

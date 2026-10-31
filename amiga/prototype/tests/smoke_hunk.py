@@ -10,7 +10,7 @@ from pathlib import Path
 import machine68k as m
 
 
-def run(executable, args, w, h, map_file=None, expected_preview=None, expected_fail=False):
+def run(executable, args, w, h, map_file=None, expected_preview=None, expected_fail=False, g1_file=None):
     mc = m.Machine(m.CPUType.M68040, 8192)
     mem, cpu = mc.mem, mc.cpu
     def invalid(mode, width, address):
@@ -87,6 +87,8 @@ def run(executable, args, w, h, map_file=None, expected_preview=None, expected_f
     map_bytes = Path(map_file).read_bytes() if map_file else None
     if expected_fail:
         map_bytes=map_bytes[:-1]+bytes([map_bytes[-1]^1])
+    g1_bytes=Path(g1_file).read_bytes() if g1_file else None
+    file_data=None
     file_position = 0
     file_open = False
     allocation = 0x300000
@@ -156,7 +158,7 @@ def run(executable, args, w, h, map_file=None, expected_preview=None, expected_f
                 result = libs[libname]
             elif lvo == -198:
                 n, flags = reg("D0"), reg("D1")
-                assert flags & 4 and (n == w * h or (map_bytes is not None and n == len(map_bytes)))
+                assert flags & 4 and (n == w * h or (map_bytes is not None and n == len(map_bytes)) or (g1_bytes is not None and n==len(g1_bytes)))
                 result = allocation
                 live[result] = n
                 allocation += (n + 15) & ~15
@@ -180,7 +182,9 @@ def run(executable, args, w, h, map_file=None, expected_preview=None, expected_f
         elif name == "dos.library":
             if lvo == -30:
                 if map_bytes is not None and string(reg("D1")) == "TestPark.amap":
-                    file_open=True;file_position=0;result=42
+                    file_data=map_bytes;file_open=True;file_position=0;result=42
+                elif g1_bytes is not None and string(reg("D1"))=="GuestFixture.dat":
+                    file_data=g1_bytes;file_open=True;file_position=0;result=42
                 else: result=0
             elif lvo == -36:
                 assert reg("D1")==42 and file_open
@@ -190,10 +194,10 @@ def run(executable, args, w, h, map_file=None, expected_preview=None, expected_f
                 result=file_position
                 origin=reg("D3");offset=reg("D2")
                 if offset & 0x80000000:offset-=0x100000000
-                file_position=(len(map_bytes) if origin==1 else 0 if origin==0xffffffff else file_position)+offset
+                file_position=(len(file_data) if origin==1 else 0 if origin==0xffffffff else file_position)+offset
             elif lvo == -42:
                 assert reg("D1")==42 and file_open
-                data=map_bytes[file_position:file_position+reg("D3")]
+                data=file_data[file_position:file_position+reg("D3")]
                 mem.w_block(reg("D2"),data);file_position+=len(data);result=len(data)
             elif lvo == -60:
                 result = 1
@@ -266,3 +270,7 @@ if __name__ == "__main__":
 
     if len(sys.argv)>2:
         run(executable,"DIAGNOSTIC MAP=TestPark.amap\n",640,480,sys.argv[2],expected_fail=True)
+
+    if len(sys.argv)>5:
+        run(executable,"G1=GuestFixture.dat MAP=TestPark.amap\n",640,480,sys.argv[2],sys.argv[6],g1_file=sys.argv[5])
+        run(executable,"LOW G1=GuestFixture.dat MAP=TestPark.amap\n",320,240,sys.argv[2],sys.argv[7],g1_file=sys.argv[5])

@@ -30,7 +30,7 @@ typedef struct {
 } Canvas;
 typedef struct { int x, y, w, h; } Rect;
 typedef struct {
-    int width, height, bench;
+    int width, height, bench, markers;
     uint32_t mode;
     char g1_path[512], map_path[512];
 } Options;
@@ -42,7 +42,7 @@ enum {
 typedef struct {
     G1 g1;
     ParkMap map;
-    int map_zoom, map_base, map_guests_visible, map_tracks_visible, map_ride_selected;
+    int map_guest_sprites, map_zoom, map_base, map_guests_visible, map_tracks_visible, map_ride_selected;
     Canvas canvas;
     uint8_t *background;
     uint8_t dirty[MAX_DIRTY];
@@ -56,6 +56,7 @@ typedef struct {
 int g1_open(G1 *g, const void *bytes, uint32_t size);
 int g1_sprite(const G1 *g, uint32_t id, Sprite *s);
 int g1_draw(const G1 *g, uint32_t id, Canvas *c, int x, int y, uint8_t colour);
+int g1_draw_guest(const G1 *, uint32_t, Canvas *, int, int, unsigned, unsigned, unsigned);
 void g1_palette(const G1 *g, uint32_t rgb[256]);
 void default_palette(uint32_t rgb[256]);
 void options_init(Options *o);

@@ -89,6 +89,7 @@ int options_parse(Options *o, const char *args, int length) {
         if (quote) return 0;
         token[n] = 0;
         if (equal(token, "LOW")) { o->width = 320; o->height = 240; }
+        else if (equal(token,"MARKERS"))o->markers=1;
         else if (equal(token, "BENCH")) o->bench = 1;
         else if (equal(token, "DIAGNOSTIC")) o->g1_path[0] = '-';
         else {
@@ -277,7 +278,7 @@ static void hud(Runner *r) {
     runner_fill(c, 0, 0, c->width, 48, 1);
     runner_fill(c, 0, c->height - 48, c->width, 48, 1);
     runner_fill(c, 0, 46, c->width, 2, 4);
-    runner_text(c, 8, 6, r->map.side ? "OPENRCT2 / IMPORTED PARK VIEW 0.10" : c->width > 320 ? "OPENRCT2 / AMIGA GRAPHICS RUNNER 0.1" : "OPENRCT2 / AMIGA RUNNER 0.1", 3);
+    runner_text(c, 8, 6, r->map.side ? "OPENRCT2 / IMPORTED PARK VIEW 0.11" : c->width > 320 ? "OPENRCT2 / AMIGA GRAPHICS RUNNER 0.1" : "OPENRCT2 / AMIGA RUNNER 0.1", 3);
     if(r->map.side&&!r->atlas){p=word(p,"MAP ");p=number(p,r->map.side);p=word(p," GUESTS ");p=number(p,r->map_guests_visible?r->map.guest_count:0);}
     else {p = word(p, r->atlas ? "SPRITES " : "CROWD "); p = number(p, r->atlas ? (uint32_t)r->page : (uint32_t)r->guests);}
     p = word(p, "  FPS "); p = number(p, (unsigned)r->fps10 / 10u); *p++ = '.'; *p++ = (char)('0' + r->fps10 % 10); *p = 0;
@@ -354,7 +355,7 @@ static uint32_t milliseconds(uint32_t ticks, uint32_t hz) {
 }
 static void report(Runner *r, uint32_t hz, uint32_t ticks, unsigned frames) {
     char text[512], *p = text;
-    p = word(p, r->map.side ? "OpenRCT2 imported park viewer 0.10\nView-only terrain/path benchmark; no park simulation.\nResolution: " : "OpenRCT2 Amiga graphics runner 0.1\nGraphics benchmark only; no OpenRCT2 simulation.\nResolution: ");
+    p = word(p, r->map.side ? "OpenRCT2 imported park viewer 0.11\nView-only terrain/path benchmark; no park simulation.\nResolution: " : "OpenRCT2 Amiga graphics runner 0.1\nGraphics benchmark only; no OpenRCT2 simulation.\nResolution: ");
     p = number(p, (unsigned)r->canvas.width); p = word(p, " x "); p = number(p, (unsigned)r->canvas.height);
     p = word(p, "\nSprites: "); p = number(p, r->g1.count);
     p = word(p, r->map.side ? "\nImported map elements: " : "\nScripted visitors: "); p = number(p, r->map.side ? r->map.elements : (unsigned)r->guests);
@@ -407,6 +408,7 @@ int runner_main(void) {
         }
         platform_log("Imported map/guest snapshot loaded. No rides or simulation.\n");
     }
+    state.map_guest_sprites=!o->markers;
     if (!platform_open(o)) goto cleanup;
     g1_palette(&state.g1, rgb); if(state.map.side){rgb[2]=0x267db4;rgb[5]=0x64b4cf;} platform_palette(rgb);
     hz = platform_frequency(); if (hz < 1000u) { platform_log("No usable E-clock timer.\n"); goto cleanup; }

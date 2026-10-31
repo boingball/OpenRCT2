@@ -35,13 +35,13 @@ int main(int argc, char **argv) {
     uint8_t *frame, *back, *file = NULL, *map_file = NULL;
     int w = 640, h = 480, x, y, i;
     FILE *out;
-    if (argc < 2 || argc > 5) { fputs("usage: runner_host output.ppm [MAP=imported.amap] [original-g1.dat] [LOW]\n", stderr); return 2; }
+    if (argc < 2 || argc > 6) { fputs("usage: runner_host output.ppm [MAP=imported.amap] [original-g1.dat] [LOW] [MARKERS]\n", stderr); return 2; }
     for (i = 2; i < argc; i++) if (!strcmp(argv[i], "LOW")) { w=320; h=240; }
     frame = calloc((size_t)w, (size_t)h); back = calloc((size_t)w, (size_t)h);
     if (!frame || !back) return 2;
     runner_init(&r, frame, back, w, h);
     for (i=2;i<argc;i++) {
-        if(!strcmp(argv[i],"LOW"))continue;
+        if(!strcmp(argv[i],"LOW")||!strcmp(argv[i],"MARKERS"))continue;
         if(!strncmp(argv[i],"MAP=",4)) {
             if(map_file||!platform_load(argv[i]+4,&map_file,&map_size)||!runner_set_map(&r,map_file,map_size)) {
                 fputs("invalid MAP file\n",stderr);free(map_file);free(file);free(back);free(frame);return 2;
@@ -53,6 +53,7 @@ int main(int argc, char **argv) {
             r.diagnostic=0;
         }
     }
+    for(i=2;i<argc;i++)if(!strcmp(argv[i],"MARKERS"))r.map_guest_sprites=0;
     for (i=0;i<80;i++) { runner_step(&r,40000,1000000); runner_render(&r); memset(r.dirty,0,sizeof(r.dirty)); }
     g1_palette(&r.g1,rgb);if(r.map.side){rgb[2]=0x267db4;rgb[5]=0x64b4cf;}
     out=fopen(argv[1],"wb");

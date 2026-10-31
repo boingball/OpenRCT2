@@ -1,11 +1,11 @@
-# OpenRCT2 Amiga imported park viewer 0.10
+# OpenRCT2 Amiga imported park viewer 0.11
 
 Targets 68060, 64 MB Fast RAM, AmigaOS 3.1+ and an 8-bit P96/CyberGraphX RTG
 mode. This milestone displays **real imported terrain/path data**, with
 simplified geometry and colours. It displays saved track footprints and static guest markers. It does not
 simulate the park or load ride/scenery graphics.
 
-The 0.10 download includes pre-exported maps, so no G1 data or conversion step
+The 0.11 download includes pre-exported maps, so no G1 data or conversion step
 is needed to try the viewer. In its drawer, run:
 
 ```text
@@ -61,6 +61,43 @@ startup/OS ABI/RTG copy and allocation/file cleanup through mocked libraries.
 The captured native map viewport matches host preview pixels at both sizes.
 The mock is not P96/CGX: this build still needs real WinUAE/Amiga validation.
 No native map frame rate is claimed.
+
+## Optional original guest sprites (0.11)
+
+To replace supported normal guest markers with original RCT2 graphics, provide
+your own original 29,294-entry G1.DAT (not RCT Classic):
+
+```text
+OpenRCT2ParkView MAP=BusyPark.amap G1="Work:RCT2/Data/g1.dat"
+```
+
+No game artwork is included. The normal animation group (0) in walking,
+queuing, entering-park and leaving-park states uses a fixed neutral walking
+frame, facing the saved direction. Shirt and trouser colours use the engine's
+legacy 32-colour remap tables. This is still a static snapshot, not the exact
+saved animation frame, action pose or guest AI. Other groups/poses and missing
+or invalid sprites retain diagnostic markers; on-ride/picked guests stay hidden.
+`MARKERS` forces markers even with G1 loaded. Space hides/shows all guests.
+
+The new guest path supports validated bitmap/RLE sprites, clipped and sampled
+at all four zoom levels. It uses both remap ramps without changing the original
+demo's single-remap renderer. Every source row is checked before writing,
+including rows skipped by zoom; malformed sprites cannot leave partial pixels.
+The cached map painter still has approximate cell-based occlusion.
+
+The clothing tables are generated from this repository's palette PNGs with
+`python3 tools/guest_palette.py`; `--check` verifies all 32 tables. Host
+ASan/UBSan and bare 68060 tests compare bitmap/RLE output against independent
+expanded-pixel references, covering zoom, clipping, black as a real clothing
+colour, two remaps and malformed input. The actual HUNK's G1 load/render/free
+path and viewport pixels match the host with synthetic fixture artwork at
+both display sizes. The fixture contains no original game art. The previous
+native G1 demo worked in the user's WinUAE test, but this new sprite path has
+not yet been checked against an original G1 file or real WinUAE/P96/CGX.
+
+The included importer is unchanged at 0.10; no new save format is introduced.
+V1/v2/v3 AMAP files remain supported. Original ride/scenery graphics and native
+park simulation remain absent.
 
 ## Original graphics demo
 

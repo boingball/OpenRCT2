@@ -85,6 +85,52 @@ static void test_g1(void) {
     put32(file+8,0xffffffffu); assert(!g1_sprite(&g,0,&s));
 }
 
+static void test_guest_sprites(void) {
+    uint8_t file[256]={0},matrix[35],guarded[16+16*16+16],before[sizeof(guarded)],expected[256];
+    const uint8_t black[12]={10,10,10,10,10,11,12,13,14,15,16,17};
+    const uint8_t grey[12]={10,11,12,13,14,15,16,17,18,19,20,21};
+    G1 g;Canvas c={guarded+16,16,16,2,14};unsigned format,zoom,colours,i;
+    int x,y;
+    for(i=0;i<35;i++){static const uint8_t ramp[]={0,243,244,202,213,100,254};matrix[i]=ramp[(i+i/7)%7];}
+    for(format=0;format<2;format++) {
+        unsigned n=24,row;
+        memset(file,0,sizeof(file));put32(file,1);put16(file+12,7);put16(file+14,5);
+        put16(file+16,(uint16_t)-3);put16(file+18,(uint16_t)-2);put16(file+20,format?4:1);
+        if(!format){memcpy(file+n,matrix,35);n+=35;}
+        else {
+            n+=10;
+            for(row=0;row<5;row++) {
+                unsigned column,last=n;put16(file+24+row*2,n-24);
+                for(column=0;column<7;column++)if(matrix[row*7+column]) {
+                    last=n;file[n++]=1;file[n++]=(uint8_t)column;file[n++]=matrix[row*7+column];
+                }
+                file[last]|=128;
+            }
+        }
+        put32(file+4,n-24);assert(g1_open(&g,file,n));
+        for(zoom=0;zoom<4;zoom++)for(colours=0;colours<2;colours++)for(y=-6;y<20;y++)for(x=-6;x<20;x++) {
+            int scale=1<<zoom;const uint8_t *shirt=colours?grey:black,*trousers=colours?black:grey;
+            memset(guarded,0xa5,sizeof(guarded));memset(c.pixels,19,256);memset(expected,19,256);
+            for(i=0;i<35;i++) {
+                int sx=-3+(int)(i%7),sy=-2+(int)(i/7),dx,dy;uint8_t pixel=matrix[i];
+                if(!pixel || sx%scale || sy%scale)continue;
+                dx=x+sx/scale;dy=y+sy/scale;
+                if(dx<0||dx>=16||dy<2||dy>=14)continue;
+                if(pixel>=243)pixel=shirt[pixel-243];else if(pixel>=202&&pixel<=213)pixel=trousers[pixel-202];
+                expected[dy*16+dx]=pixel;
+            }
+            assert(g1_draw_guest(&g,0,&c,x,y,zoom,colours,1-colours));assert(!memcmp(c.pixels,expected,256));
+            for(i=0;i<16;i++)assert(guarded[i]==0xa5&&guarded[272+i]==0xa5);
+        }
+        memcpy(before,guarded,sizeof(before));
+        assert(!g1_draw_guest(&g,0,&c,3,3,4,0,0));assert(!g1_draw_guest(&g,0,&c,3,3,0,32,0));
+        if(format) {file[n-3]=127;assert(!g1_draw_guest(&g,0,&c,3,3,3,0,0));}
+        else {put16(file+12,65);assert(!g1_draw_guest(&g,0,&c,3,3,0,0,0));}
+        assert(!memcmp(before,guarded,sizeof(before)));
+    }
+    puts("Guest bitmap/RLE dual clothing remap/zoom/clipping/atomic rejection: PASS");
+}
+
 static void test_palette(void) {
     uint8_t *file=calloc(1,8+1533*16+6); G1 g; uint32_t pal[256]; uint8_t *e=file+8+1532*16;
     assert(file); put32(file,1533); put32(file+4,6);
@@ -101,6 +147,7 @@ static void test_options(void) {
     assert(!options_parse(&o,"MODEID=0xGG",11)); assert(!options_parse(&o,"G1=\"broken",10));
     assert(!options_parse(&o,"UNKNOWN",7)); assert(!options_parse(&o,"MODEID=123456789",16));
     assert(!options_parse(&o,"G1=",3));
+    assert(options_parse(&o,"MARKERS",7)&&o.markers);
 }
 static void test_upstream_fixture(void) {
     static uint8_t file[9000], pixels[128*128];
@@ -287,7 +334,7 @@ static void test_saved_rides(void) {
 }
 int main(void) {
     uint32_t a,b;
-    test_g1(); test_palette(); test_options(); test_upstream_fixture();
+    test_g1(); test_guest_sprites(); test_palette(); test_options(); test_upstream_fixture();
     a=test_scene(640,480); b=test_scene(320,240);
     test_park_map(); test_saved_guests(); test_saved_rides();
     printf("G1 clipping/malformed files/palettes/options/dirty redraw: PASS\n640x480 %08lx 320x240 %08lx\n",(unsigned long)a,(unsigned long)b);

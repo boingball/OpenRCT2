@@ -5,6 +5,7 @@
  * Supports the original RCT2 G1 file, bitmap/RLE and one primary remap.
  */
 #include "runner.h"
+#include "guest_palette.h"
 
 static uint16_t le16(const uint8_t *p) { return (uint16_t)(p[0] | (uint16_t)p[1] << 8); }
 static uint32_t le32(const uint8_t *p) {
@@ -130,4 +131,36 @@ void g1_palette(const G1 *g, uint32_t rgb[256]) {
         rgb[s.x + i] = (uint32_t)p[2] << 16 | (uint32_t)p[1] << 8 | p[0];
     }
     /* Keep diagnostic text pens legible; the original dynamic palette starts at 10. */
+}
+
+/* Static snapshot sprites use nearest-neighbour sampling on the anchor's
+ * world-pixel grid. Both clothing ramps follow Drawing.Sprite.cpp. All source
+ * rows are validated before writing, including rows skipped by zoom. */
+int g1_draw_guest(const G1 *g,uint32_t id,Canvas *c,int x,int y,unsigned zoom,unsigned shirt,unsigned trousers) {
+    Sprite s;const uint8_t *base;int row;unsigned scale;
+    if(zoom>3 || shirt>=32 || trousers>=32 || !g1_sprite(g,id,&s))return 0;
+    if(s.width>64 || s.height>128 || !valid_pixels(g,&s))return 0;
+    scale=1u<<zoom;base=g->data+s.offset;
+    for(row=0;row<s.height;row++) {
+        int dy,offset=s.y+row;
+        unsigned run=0;int end=0;
+        if(offset%(int)scale)continue;
+        dy=y+offset/(int)scale;if(dy<c->top || dy>=c->bottom)continue;
+        if(s.flags&4)run=le16(base+row*2);
+        while(!end) {
+            unsigned first,n,k;
+            if(s.flags&4){n=base[run++];first=base[run++];end=n&128;n&=127;}
+            else {first=0;n=(unsigned)s.width;run=(unsigned)row*(unsigned)s.width;end=1;}
+            for(k=0;k<n;k++) {
+                int dx,sx=s.x+(int)(first+k);uint8_t pixel=base[run+k];
+                if(sx%(int)scale || (!(s.flags&4) && (s.flags&1) && !pixel))continue;
+                dx=x+sx/(int)scale;if(dx<0 || dx>=c->width)continue;
+                if(pixel>=243 && pixel<=254)pixel=guest_colour_ramps[shirt][pixel-243];
+                else if(pixel>=202 && pixel<=213)pixel=guest_colour_ramps[trousers][pixel-202];
+                c->pixels[dy*c->width+dx]=pixel;
+            }
+            run+=n;
+        }
+    }
+    return 1;
 }

@@ -77,7 +77,7 @@ jobs:
           tar -xJf /tmp/openamigagcc.tar.xz -C /tmp
       - name: Install forward headers for actual S6Data
         run: |
-          sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev gcc-m68k-linux-gnu binutils-m68k-linux-gnu libc6-dev-m68k-cross qemu-user
+          sudo apt-get update && sudo apt-get install -y python3-pil nlohmann-json3-dev gcc-m68k-linux-gnu binutils-m68k-linux-gnu libc6-dev-m68k-cross qemu-user
           python3 -m pip install machine68k==0.4.1
           mkdir -p amiga/core/build/headers
           cp -R /usr/include/nlohmann amiga/core/build/headers/
@@ -91,12 +91,19 @@ jobs:
         run: python3 amiga/core/verify_partial_import.py amiga/core/build/import-probe-host
       - name: Build and verify imported-map RTG viewer
         run: |
+          python3 amiga/prototype/tools/guest_palette.py --check
           make -C amiga/prototype amiga host test test-asan test-68k check-060
           map=build/import-verification/host/bpb/ImportedMap.amap
           amiga/prototype/build/runner_host build/park-view.ppm MAP="$map"
           amiga/prototype/build/runner_host build/park-view-low.ppm MAP="$map" LOW
           python3 amiga/prototype/tests/smoke_hunk.py \
             amiga/prototype/build/OpenRCT2Runner "$map" build/park-view.ppm build/park-view-low.ppm
+          python3 amiga/prototype/tests/make_guest_fixture.py build/guest-fixture.dat
+          amiga/prototype/build/runner_host build/guest-view.ppm MAP="$map" build/guest-fixture.dat
+          amiga/prototype/build/runner_host build/guest-view-low.ppm MAP="$map" build/guest-fixture.dat LOW
+          python3 amiga/prototype/tests/smoke_hunk.py \
+            amiga/prototype/build/OpenRCT2Runner "$map" build/park-view.ppm build/park-view-low.ppm \
+            build/guest-fixture.dat build/guest-view.ppm build/guest-view-low.ppm
       - uses: actions/upload-artifact@v4
         with:
           name: Amiga-native-core-probes-open4
