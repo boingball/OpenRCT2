@@ -37,4 +37,6 @@ If NOT EXISTS "bin/openrct2"
   Echo "OpenRCT2: please start this script from inside the OpenRCT2 drawer."
   Quit 10
 EndIf
-bin/openrct2 --rct2-data-path="<RCT2DIR>" --openrct2-data-path=data --user-data-path=user
+; Keep option values as separate arguments. The Amiga CRT preserves quotes
+; embedded after '=' (for example --rct2-data-path="RCT2:") as path characters.
+bin/openrct2 --rct2-data-path "<RCT2DIR>" --openrct2-data-path "data" --user-data-path "user"

@@ -209,3 +209,18 @@ The full native runtime regression (including negative zero, infinities and
 NaNs) and the rebuilt GUI version/startup/shutdown check also pass under
 those settings, with 64 MB RAM and a 1 MB stack and without FPSP emulation.
 Real WinUAE startup beyond this point and 64 MB gameplay remain unverified.
+
+### Launcher option quoting (0.17a)
+
+The next real WinUAE trace confirms window setup, TriggerResize, audio
+initialisation and context shutdown complete. G1 loading now reports an
+attempt to open '"RCT2:"/Data/g1.dat', while the standalone prerequisite
+checker resolves UHD0:RCT2/Data/g1.dat successfully. The launcher embedded
+quotes after an option's equals sign; the native CRT preserved those quotes
+in the argument value. This caused the bogus volume request and G1 failure.
+
+Pass each option and its quoted value as separate arguments, which the
+engine's ParseLongOption explicitly supports. This also retains paths with
+spaces. The 0.17a update changes only the launch script and requires the
+existing 0.17 executable. It does not establish successful G1 loading or
+gameplay until the corrected launch has been tested on WinUAE.
