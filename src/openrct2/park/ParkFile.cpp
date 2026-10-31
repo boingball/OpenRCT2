@@ -1267,6 +1267,13 @@ namespace OpenRCT2
                     cs.readWrite(gameState.mapSize.x);
                     cs.readWrite(gameState.mapSize.y);
 
+                    if constexpr (MemoryProfile::kSmall)
+                    {
+                        if (cs.getMode() == OrcaStream::Mode::reading
+                            && !MemoryProfile::mapFits(gameState.mapSize.x, gameState.mapSize.y))
+                            throw std::runtime_error("Park exceeds the small-memory build's 256-tile map limit.");
+                    }
+
                     if (cs.getMode() == OrcaStream::Mode::writing)
                     {
                         auto tileElements = GetReorganisedTileElementsWithoutGhosts();
@@ -1278,6 +1285,11 @@ namespace OpenRCT2
                     gameStateInitAll(gameState, gameState.mapSize);
 
                     auto numElements = cs.read<uint32_t>();
+                    if constexpr (MemoryProfile::kSmall)
+                    {
+                        if (numElements > kMaxTileElements)
+                            throw std::runtime_error("Park exceeds the small-memory build's tile-element limit.");
+                    }
                     std::vector<TileElement> tileElements;
                     tileElements.resize(numElements);
                     cs.read(tileElements.data(), tileElements.size() * sizeof(TileElement));
@@ -1535,6 +1547,13 @@ namespace OpenRCT2
                 cs.readWriteVector(rideIds, [&cs, &version, &os](RideId& rideId) {
                     // Ride ID
                     cs.readWrite(rideId);
+
+                    if constexpr (MemoryProfile::kSmall)
+                    {
+                        if (cs.getMode() == OrcaStream::Mode::reading
+                            && rideId.ToUnderlying() >= Limits::kMaxRidesInPark)
+                            throw std::runtime_error("Park contains a ride ID outside the small-memory build's range.");
+                    }
 
                     auto& ride = [&]() -> Ride& {
                         if (cs.getMode() == OrcaStream::Mode::writing)
@@ -2799,6 +2818,11 @@ namespace OpenRCT2
             T placeholder{};
 
             auto index = cs.read<EntityId>();
+            if constexpr (MemoryProfile::kSmall)
+            {
+                if (index.ToUnderlying() >= kMaxEntities)
+                    throw std::runtime_error("Park contains an entity ID outside the small-memory build's range.");
+            }
             auto* ent = gameState.entities.createEntityAt<T>(index);
             if (ent == nullptr)
             {

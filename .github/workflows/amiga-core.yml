@@ -1,0 +1,76 @@
+name: Amiga core port investigation
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'amiga/core/**'
+      - 'src/openrct2/MemoryProfile.h'
+      - 'src/openrct2/Limits.h'
+      - 'src/openrct2/entity/EntityRegistry.h'
+      - 'src/openrct2/world/MapLimits.h'
+      - 'src/openrct2/park/ParkFile.cpp'
+      - 'src/openrct2/rct2/S6Importer.cpp'
+      - '.github/workflows/amiga-core.yml'
+jobs:
+  compare-profiles:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: OpenRCT2/objects
+          ref: 978f596972c1163dc670d853dd6add4766f10dbd
+          path: build/objects-source
+      - name: Build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libzip-dev zlib1g-dev libzstd-dev libpng-dev libicu-dev nlohmann-json3-dev
+      - name: Configure and build both actual cores
+        run: |
+          for profile in full small; do
+            small=OFF
+            if [ "$profile" = small ]; then small=ON; fi
+            cmake -S . -B build/core-$profile -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release -DDISABLE_IPO=ON \
+              -DCMAKE_CXX_FLAGS=-Wno-error=stringop-overflow \
+              -DOPENRCT2_BUILD_CORE_BENCH=ON -DOPENRCT2_SMALL_MEMORY=$small \
+              -DDISABLE_GUI=ON -DENABLE_SCRIPTING=OFF -DDISABLE_NETWORK=ON \
+              -DDISABLE_HTTP=ON -DDISABLE_TTF=ON -DDISABLE_OPENGL=ON \
+              -DDISABLE_DISCORD_RPC=ON -DDISABLE_VERSION_CHECKER=ON \
+              -DDISABLE_FLAC=ON -DDISABLE_VORBIS=ON -DDOWNLOAD_OBJECTS=OFF \
+              -DDOWNLOAD_TITLE_SEQUENCES=OFF -DDOWNLOAD_OPENSFX=OFF -DDOWNLOAD_OPENMUSIC=OFF
+            cmake --build build/core-$profile --target openrct2-core-bench -j2
+          done
+      - name: Compare real simulations and test capacity rejection
+        run: |
+          mkdir -p build/headless-data
+          ln -s "$GITHUB_WORKSPACE/data/language" build/headless-data/language
+          ln -s "$GITHUB_WORKSPACE/build/objects-source/objects" build/headless-data/object
+          python3 amiga/core/verify_profiles.py \
+            build/core-full/amiga/core/openrct2-core-bench \
+            build/core-small/amiga/core/openrct2-core-bench \
+            "$GITHUB_WORKSPACE/build/headless-data" build/profile-verification
+      - uses: actions/upload-artifact@v4
+        with:
+          name: actual-core-profile-comparison
+          path: |
+            build/profile-verification/*.log
+            build/profile-verification/*.json
+  native-probes:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned AmigaPorts compiler
+        run: |
+          curl -L --fail -o /tmp/amiga-gcc.tar.xz https://github.com/AmigaPorts/m68k-amigaos-gcc/releases/download/v16.2-rc21/m68k-amigaos-gcc-16.2-rc21-x86_64-linux.tar.xz
+          echo '45e9dc23db0915c05f957e2ba1356e8217b12d2276a09c6521329fe44f716c42  /tmp/amiga-gcc.tar.xz' | sha256sum -c -
+          mkdir /tmp/amiga-gcc
+          tar -xf /tmp/amiga-gcc.tar.xz -C /tmp/amiga-gcc
+      - name: Build native diagnostics and test host runtime
+        run: make -C amiga/core native test AMIGA_CXX=/tmp/amiga-gcc/m68k-amigaos-gcc-16.2/bin/m68k-amigaos-g++
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Amiga-native-core-probes
+          path: |
+            amiga/core/build/OpenRCT2CoreProbe
+            amiga/core/build/OpenRCT2CoreProbe-Full
+            amiga/core/README.md

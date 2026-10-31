@@ -144,6 +144,12 @@ namespace OpenRCT2::RCT2
             auto chunkReader = SawyerChunkReader(stream);
             chunkReader.ReadChunk(&_s6.Header, sizeof(_s6.Header));
 
+            if constexpr (MemoryProfile::kSmall)
+            {
+                if (_s6.Header.ClassicFlag == 0xf)
+                    throw std::runtime_error("RCT Classic extended saves require the full-memory build.");
+            }
+
             LOG_VERBOSE("saved game classic_flag = 0x%02x", _s6.Header.ClassicFlag);
             if (isScenario)
             {
@@ -212,6 +218,12 @@ namespace OpenRCT2::RCT2
                 chunkReader.ReadChunk(&_s6.ElapsedMonths, 16);
                 chunkReader.ReadChunk(&_s6.TileElements, sizeof(_s6.TileElements));
                 ReadChunk6(chunkReader, 488816);
+            }
+
+            if constexpr (MemoryProfile::kSmall)
+            {
+                if (!MemoryProfile::mapFits(_s6.MapSize, _s6.MapSize))
+                    throw std::runtime_error("Saved park exceeds the small-memory build's map limit.");
             }
 
             _isScenario = isScenario;

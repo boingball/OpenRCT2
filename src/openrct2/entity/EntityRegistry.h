@@ -11,6 +11,7 @@
 
 #include "../core/EnumUtils.hpp"
 #include "../world/MapLimits.h"
+#include "../MemoryProfile.h"
 #include "EntityBase.h"
 
 #include <array>
@@ -22,8 +23,11 @@ struct CoordsXY;
 
 namespace OpenRCT2
 {
-    constexpr uint16_t kMaxEntities = 65535;
-    constexpr uint16_t kMaxMiscEntities = 6400;
+    constexpr uint16_t kMaxEntities = MemoryProfile::kEntities;
+    // The effects allocator also reserves this many free slots for other
+    // entities. Keeping 6400 with a 10000-slot pool would suppress effects
+    // once only 3600 ordinary entities exist.
+    constexpr uint16_t kMaxMiscEntities = MemoryProfile::kSmall ? 300 : 6400;
 
     constexpr const uint32_t kSpatialIndexSize = (kMaximumMapSizeTechnical * kMaximumMapSizeTechnical) + 1;
     constexpr uint32_t kSpatialIndexNullBucket = kSpatialIndexSize - 1;

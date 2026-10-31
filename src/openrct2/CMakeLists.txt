@@ -299,6 +299,7 @@ endif ()
 
 # Defines
 target_compile_definitions(libopenrct2 PUBLIC
+        $<$<BOOL:${OPENRCT2_SMALL_MEMORY}>:OPENRCT2_SMALL_MEMORY>
         $<$<BOOL:${USE_MMAP}>:USE_MMAP>
         $<$<BOOL:${DISABLE_NETWORK}>:DISABLE_NETWORK>
         $<$<BOOL:${DISABLE_HTTP}>:DISABLE_HTTP>
