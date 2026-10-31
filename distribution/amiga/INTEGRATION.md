@@ -145,3 +145,22 @@ the data checker also exit successfully. No FPSP emulation is enabled.
 These are runtime checks, not full GUI gameplay or native simulation parity.
 The original RCT2 data requirement and the 64 MB graphical-memory validation
 remain outstanding separately.
+
+### Directory lookup and diagnostic launches
+
+`OpenRCT2Check` explicitly enumerates the installation root and its Data
+folder, compares entry names without ASCII case sensitivity, and opens the
+actual filename spelling returned by DOS. It no longer relies on a previous
+CD/Dir visiting the directory. NameFromLock/AddPart provide an absolute
+path and the process current directory is never changed. Fresh native
+processes with FPU disabled pass upper/lower/mixed-case path fixtures;
+missing and truncated G1 files are rejected. These synthetic headers are
+path tests, not valid game data or graphical-startup evidence.
+
+`TraceStartup` and `TraceStartup-NoAudio` append an Avail snapshot and
+startup stage logging to separate normal/no-audio files on Work:. Console
+output goes to a different file to avoid two output handles overwriting
+trace entries. The latter launcher temporarily disables audio for an A/B
+comparison. Both retain the normal game launcher and existing configuration.
+The reported post-screen Guru is not diagnosed or fixed by these helper
+changes; its trace is needed to identify the failing stage.

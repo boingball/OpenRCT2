@@ -1,0 +1,12 @@
+; Start from the OpenRCT2 drawer. Appends logs; never deletes an earlier trace.
+Failat 21
+If NOT EXISTS "OpenRCT2"
+  Echo "Start this script from inside the OpenRCT2 drawer."
+  Quit 10
+EndIf
+Echo "=== OpenRCT2 0.15 startup: normal audio settings ===" >>"Work:OpenRCT2-startup.log"
+Avail >>"Work:OpenRCT2-startup.log"
+SetEnv OPENRCT2_TRACE "Work:OpenRCT2-startup.log"
+Execute OpenRCT2 >>"Work:OpenRCT2-console.log"
+UnsetEnv OPENRCT2_TRACE
+Echo "Trace saved in Work:OpenRCT2-startup.log. If the Amiga crashed, attach that file after rebooting."
