@@ -1,12 +1,35 @@
-# OpenRCT2 Amiga core investigation — milestone 0.4
+# OpenRCT2 Amiga core investigation — milestone 0.5
 
 The 0.1 graphics runner has passed the user's WinUAE RTG test with original G1
 graphics. This milestone tackles the **actual engine**, starting with memory,
 a real simulation benchmark on the host, and native C++ runtime probes.
 
 **There is no native Amiga park simulation executable yet.** The downloadable
-0.4 executables below are diagnostics. The 0.1 graphics runner remains the
+0.5 executables below are diagnostics. The 0.1 graphics runner remains the
 working RTG test.
+
+## Thread creation diagnostic update (0.5)
+
+The user confirmed probe 0.4 passes baseline and ALLOCATE on WinUAE, but
+THREADS still raises error 8000000B. Inspection found pthread_create calls
+snprintf with `pthread thread #%ld` before starting each worker, reaching
+the same FPU-using formatter avoided by 0.4's main output path.
+
+Probe 0.5 links a narrow --wrap=snprintf shim for that exact thread-name
+format. It preserves the formatted length, truncation and NUL semantics;
+other formats still use the normal runtime. This is a probe workaround,
+not a general repair of the toolchain's soft-float C library. Makefile users
+must include pthread_format.cpp and the wrapper linker flag together.
+
+The diagnostic now prints checkpoints before mutex construction, worker
+creation/join and the condition-variable test. THREADS remains opt-in.
+
+Validation: host baseline, allocation, threads and formatter boundary tests
+pass. Native 68060/no-FPU baseline and small-profile allocation pass. The
+native THREADS test gets past thread-name formatting and reaches
+CreateNewProc, which volamos does not implement. A complete native threading
+PASS therefore still requires WinUAE/real AmigaOS testing. No full park
+simulation is included.
 
 ## WinUAE crash diagnostic update (0.4)
 

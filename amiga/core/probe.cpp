@@ -81,8 +81,10 @@ static void print(const char* format, ...)
     }
 }
 
+
 static void test_threads()
 {
+    print("Thread stage: construct mutex\n");
     std::mutex mutex;
     int protectedCounter = 0;
     std::atomic<int> completed{ 0 };
@@ -102,13 +104,17 @@ static void test_threads()
         completed.fetch_add(1);
     };
 
+    print("Thread stage: create worker 1\n");
     std::thread first(worker, 1);
+    print("Thread stage: create worker 2\n");
     std::thread second(worker, 2);
     if (!first.joinable() || !second.joinable())
         throw std::runtime_error("std::thread did not create joinable workers");
+    print("Thread stage: join workers\n");
     first.join();
     second.join();
 
+    print("Thread stage: condition variable\n");
     std::mutex waitMutex;
     std::condition_variable condition;
     bool ready = false;
@@ -134,9 +140,9 @@ static void test_threads()
 int main(int argc, char** argv)
 {
     using namespace OpenRCT2;
-    print("Probe 0.4: entered main (integer-only output)\n");
+    print("Probe 0.5: entered main (integer-only output)\n");
     report = std::fopen("OpenRCT2CoreProbe.txt", "w");
-    print("OpenRCT2 C++23 core ABI/runtime probe 0.4\n");
+    print("OpenRCT2 C++23 core ABI/runtime probe 0.5\n");
     print("This is a memory/runtime probe, not the park simulation.\n");
     print("Profile: %s\nPointer bits: %lu\n", MemoryProfile::kSmall ? "small-memory" : "standard",
         static_cast<unsigned long>(sizeof(void*) * 8));
