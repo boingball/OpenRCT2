@@ -111,3 +111,22 @@ Full native simulation under volamos is blocked by its unimplemented
 claimed here. The graphical game also needs the user's original RCT2 assets.
 The default remains inline jobs; the experimental threaded game has not been
 validated on WinUAE. 64 MB graphical playability remains a target to measure.
+
+## Startup prerequisites (0.14 launcher fix)
+
+The shipped `data` drawer contains OpenRCT2's own assets. It does not include
+original RCT2 `Data/G1.DAT`. The `RCT2:` assign must name the original game
+installation root, with `Data/G1.DAT` and `ObjData` inside it. A missing
+assign is checked with `Assign ... EXISTS` before accessing it, avoiding the
+system's misleading volume requester. The integer-only `OpenRCT2Check`
+checks that the G1 header is readable and reports missing data without
+starting the game. This is a prerequisite check, not G1 format validation.
+
+The 0.14 open4 binary also has an FPU requirement in linked runtime code,
+despite application `-msoft-float` flags. Its `--version` path succeeds with
+an emulated 68060 FPU and fails without one. `OpenRCT2Check` inspects the OS
+FPU flags and reports this requirement before C++ static initialisation.
+This does not establish the cause of a particular user's crash. The native
+checker was tested with a missing G1, truncated G1, synthetic eight-byte
+path fixture, FPU present and FPU absent. No actual park/graphics test is
+claimed by these fixtures.

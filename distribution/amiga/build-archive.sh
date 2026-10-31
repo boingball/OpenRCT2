@@ -24,6 +24,9 @@ LHACLI="$HOME/Development/AmigaDiskKit/.build/arm64-apple-macosx/release/AmigaDi
 [ -d "$DATA" ] || { echo "no data at $DATA (run spike/stage-dist.sh first)"; exit 1; }
 rm -rf "$STAGE"; mkdir -p "$STAGE/OpenRCT2/bin" "$STAGE/OpenRCT2/user"
 cp "$BIN" "$STAGE/OpenRCT2/bin/openrct2"
+CHECK="${CHECK:-$(dirname "$BIN")/OpenRCT2Check}"
+[ -f "$CHECK" ] || { echo "no startup checker at $CHECK; rebuild the openrct2 target"; exit 1; }
+cp "$CHECK" "$STAGE/OpenRCT2/bin/OpenRCT2Check"
 [ -f "$BIN_O2" ] && cp "$BIN_O2" "$STAGE/OpenRCT2/bin/openrct2-o2"
 [ -f "$BIN_FPU" ] && cp "$BIN_FPU" "$STAGE/OpenRCT2/bin/openrct2-fpu"
 cp -R "$DATA" "$STAGE/OpenRCT2/data"
@@ -45,6 +48,7 @@ ls -la "$OUT/$NAME.lha"; du -sh "$STAGE"
 UPD="$OUT/stage-update"
 rm -rf "$UPD"; mkdir -p "$UPD/OpenRCT2/bin" "$UPD/OpenRCT2/data/sequence"
 cp "$BIN" "$UPD/OpenRCT2/bin/openrct2"
+cp "$CHECK" "$UPD/OpenRCT2/bin/OpenRCT2Check"
 [ -f "$BIN_O2" ] && cp "$BIN_O2" "$UPD/OpenRCT2/bin/openrct2-o2"
 [ -f "$BIN_FPU" ] && cp "$BIN_FPU" "$UPD/OpenRCT2/bin/openrct2-fpu"
 cp "$STAGE/OpenRCT2/data/sequence/Amiga.parkseq" "$UPD/OpenRCT2/data/sequence/"

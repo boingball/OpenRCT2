@@ -15,13 +15,26 @@
 .key RCT2DIR
 .def RCT2DIR "RCT2:"
 Failat 21
-If NOT EXISTS "<RCT2DIR>"
-  Echo "OpenRCT2: RollerCoaster Tycoon 2 data not found at <RCT2DIR>."
-  Echo "Assign RCT2: to your RCT2 folder (e.g. Assign RCT2: Work:Games/RCT2) and try again."
+If "<RCT2DIR>" EQ "RCT2:"
+  Assign >NIL: RCT2: EXISTS
+  If WARN
+    Echo "RCT2: has not been assigned to your original RollerCoaster Tycoon 2 installation."
+    Echo "The included data drawer is OpenRCT2's extra data; it does not contain Data/G1.DAT."
+    Echo "Example: Assign RCT2: Work:Games/RollerCoasterTycoon2"
+    Quit 10
+  EndIf
+EndIf
+If NOT EXISTS "bin/OpenRCT2Check"
+  Echo "OpenRCT2: bin/OpenRCT2Check is missing; install the launcher update completely."
+  Quit 10
+EndIf
+Stack 1048576
+bin/OpenRCT2Check "<RCT2DIR>"
+If WARN
   Quit 10
 EndIf
 If NOT EXISTS "bin/openrct2"
   Echo "OpenRCT2: please start this script from inside the OpenRCT2 drawer."
   Quit 10
 EndIf
-bin/openrct2 --rct2-data-path=<RCT2DIR> --openrct2-data-path=data --user-data-path=user
+bin/openrct2 --rct2-data-path="<RCT2DIR>" --openrct2-data-path=data --user-data-path=user

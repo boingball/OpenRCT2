@@ -75,3 +75,10 @@ Debug switches (environment variables on the Amiga):
 - `OPENRCT2_NO_AUDIO=1`: force the dummy audio context.
 - `OPENRCT2_ENTITY_DUMP=<file>`: dump the entity stream after `simulate`
   for cross-host comparison.
+
+### Current integration runtime prerequisite
+The supplied 0.14 open4 candidate requires an FPU in linked runtime code,
+even though application code is built with soft float. Enable the emulated
+68060 FPU in WinUAE. The launcher now runs the integer-only `OpenRCT2Check`
+helper before the game and requires an original `Data/G1.DAT`, separate
+from the included OpenRCT2 data. Build `openrct2` to produce both binaries.
