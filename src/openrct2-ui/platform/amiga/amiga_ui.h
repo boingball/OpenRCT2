@@ -29,7 +29,7 @@ typedef struct amiga_ui_event
     int ascii;
 } amiga_ui_event;
 
-/* Opens an 8-bit RTG screen of (at least) the requested size plus a backdrop window.
+/* Opens an 8-bit RTG screen, or fixed PAL AGA 640x512 with OPENRCT2_DISPLAY=AGA.
  * Returns 1 and the actual size on success. */
 int amiga_ui_open(int width, int height, const char* title, int* outWidth, int* outHeight);
 void amiga_ui_close(void);
@@ -39,7 +39,7 @@ int amiga_ui_is_open(void);
 void amiga_ui_set_palette(const unsigned char* rgb);
 /* Copies a chunky 8-bit rectangle (source pitch in bytes) to screen coordinates x,y. */
 void amiga_ui_blit(const unsigned char* src, int srcPitch, int x, int y, int w, int h);
-/* 1 = direct framebuffer copy (LockBitMap), 0 = WriteChunkyPixels, -1 = not decided yet */
+/* 2 = AGA planar, 1 = direct RTG copy, 0 = WriteChunkyPixels, -1 = not decided yet */
 int amiga_ui_blit_method(void);
 
 /* Non-blocking; returns 1 when an event was written. */

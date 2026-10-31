@@ -5,10 +5,12 @@
 #ifdef __amigaos__
 
     #include "amiga_ui.h"
+    #include "amiga_c2p8.h"
 
     #include <cybergraphx/cybergraphics.h>
     #include <devices/inputevent.h>
     #include <graphics/displayinfo.h>
+    #include <graphics/modeid.h>
     #include <intuition/intuition.h>
     #include <intuition/pointerclass.h>
     #include <intuition/screens.h>
@@ -40,6 +42,41 @@ static ULONG s_palette[1 + 256 * 3 + 1];
 static Object* s_pointerObj = NULL;
 static struct BitMap* s_pointerBM = NULL;
 static int s_pointerShown = 1;
+static struct BitMap* s_agaBitmap = NULL;
+static UBYTE* s_agaPlanes = NULL;
+static UBYTE* s_agaShadow = NULL;
+static int s_agaPitch = 0, s_agaPlaneSize = 0;
+
+static int use_aga(void)
+{
+    char value[16] = { 0 };
+    return GetVar((STRPTR)"OPENRCT2_DISPLAY", value, sizeof(value), 0) > 0
+        && (strcmp(value, "AGA") == 0 || strcmp(value, "aga") == 0);
+}
+
+static ULONG aga_mode(void)
+{
+    const ULONG mode = PAL_MONITOR_ID | HIRESLACE_KEY;
+    struct DimensionInfo dimensions;
+    if (ModeNotAvailable(mode) != 0
+        || !GetDisplayInfoData(NULL, (UBYTE*)&dimensions, sizeof(dimensions), DTAG_DIMS, mode)
+        || dimensions.MaxDepth < 8)
+    {
+        amiga_trace("ui: AGA PAL 640x512x8 unavailable (AGA chipset and PAL monitor required)");
+        return INVALID_ID;
+    }
+    return mode;
+}
+
+static void free_aga(void)
+{
+    if (s_agaBitmap) { WaitBlit(); FreeBitMap(s_agaBitmap); }
+    if (s_agaPlanes) FreeVec(s_agaPlanes);
+    if (s_agaShadow) FreeVec(s_agaShadow);
+    s_agaBitmap = NULL;
+    s_agaPlanes = s_agaShadow = NULL;
+    s_agaPitch = s_agaPlaneSize = 0;
+}
 
 static void free_pointer_shape(Object* obj, struct BitMap* bm)
 {
@@ -51,11 +88,12 @@ static void free_pointer_shape(Object* obj, struct BitMap* bm)
 
 static int open_libs(void)
 {
-    if (CyberGfxBase == NULL)
+    const int aga = use_aga();
+    if (!aga && CyberGfxBase == NULL)
         CyberGfxBase = OpenLibrary("cybergraphics.library", 41);
     if (KeymapBase == NULL)
         KeymapBase = OpenLibrary("keymap.library", 36);
-    return CyberGfxBase != NULL;
+    return aga || CyberGfxBase != NULL;
 }
 
 /* Smallest 8-bit RTG mode that fits width x height; the largest one if none fits. */
@@ -65,6 +103,8 @@ static ULONG find_mode(int width, int height)
     long bestArea = -1, largestArea = -1;
     if (!open_libs())
         return INVALID_ID;
+    if (use_aga())
+        return aga_mode();
     while ((id = NextDisplayInfo(id)) != (ULONG)INVALID_ID)
     {
         long w, h, area;
@@ -95,6 +135,12 @@ int amiga_ui_list_modes(int* widths, int* heights, int max)
     int n = 0;
     if (!open_libs() || max <= 0)
         return 0;
+    if (use_aga())
+    {
+        if (aga_mode() == (ULONG)INVALID_ID) return 0;
+        widths[0] = 640; heights[0] = 512;
+        return 1;
+    }
     while ((id = NextDisplayInfo(id)) != (ULONG)INVALID_ID)
     {
         int w, h, i;
@@ -125,6 +171,8 @@ int amiga_ui_mode_available(int width, int height)
     ULONG id = find_mode(width, height);
     if (id == (ULONG)INVALID_ID)
         return 0;
+    if (use_aga())
+        return width == 640 && height == 512;
     return GetCyberIDAttr(CYBRIDATTR_WIDTH, id) == (ULONG)width && GetCyberIDAttr(CYBRIDATTR_HEIGHT, id) == (ULONG)height;
 }
 
@@ -146,6 +194,38 @@ int amiga_ui_open(int width, int height, const char* title, int* outWidth, int* 
     modeId = find_mode(width, height);
     if (modeId == (ULONG)INVALID_ID)
         return 0;
+    if (use_aga())
+    {
+        int plane;
+        width = 640; height = 512;
+        s_agaBitmap = AllocBitMap(width, height, 8, BMF_DISPLAYABLE | BMF_CLEAR, NULL);
+        if (!s_agaBitmap) return 0;
+        s_agaPitch = s_agaBitmap->BytesPerRow;
+        s_agaPlaneSize = s_agaPitch * height;
+        if (s_agaBitmap->Depth != 8 || (s_agaPitch & 3) || (s_agaBitmap->Flags & BMF_INTERLEAVED))
+        {
+            free_aga();
+            return 0;
+        }
+        for (plane = 0; plane < 8; ++plane)
+        {
+            if (!s_agaBitmap->Planes[plane] || !(TypeOfMem(s_agaBitmap->Planes[plane]) & MEMF_CHIP))
+            {
+                amiga_trace("ui: AGA bitmap was not planar Chip RAM");
+                free_aga();
+                return 0;
+            }
+        }
+        s_agaPlanes = AllocVec(8 * s_agaPlaneSize, MEMF_FAST | MEMF_CLEAR);
+        s_agaShadow = AllocVec(8 * s_agaPlaneSize, MEMF_FAST | MEMF_CLEAR);
+        if (!s_agaPlanes || !s_agaShadow)
+        {
+            free_aga();
+            return 0;
+        }
+        amiga_trace("ui: AGA PAL 640x512x8, Fast-RAM c2p8 and changed-word Chip copy");
+    }
+    else
     {
         /* open the screen at the mode's own size: no autoscroll, and the game adapts to the size it gets */
         int mw = (int)GetCyberIDAttr(CYBRIDATTR_WIDTH, modeId);
@@ -156,9 +236,12 @@ int amiga_ui_open(int width, int height, const char* title, int* outWidth, int* 
     }
     s_screen = OpenScreenTags(
         NULL, SA_DisplayID, modeId, SA_Width, width, SA_Height, height, SA_Depth, 8, SA_Title, (ULONG)title, SA_Quiet, TRUE,
-        SA_ShowTitle, FALSE, SA_Behind, FALSE, TAG_DONE);
+        SA_ShowTitle, FALSE, SA_Behind, FALSE, s_agaBitmap ? SA_BitMap : TAG_IGNORE, (ULONG)s_agaBitmap, TAG_DONE);
     if (s_screen == NULL)
+    {
+        free_aga();
         return 0;
+    }
     s_window = OpenWindowTags(
         NULL, WA_CustomScreen, (ULONG)s_screen, WA_Left, 0, WA_Top, 0, WA_Width, s_screen->Width, WA_Height, s_screen->Height,
         WA_Backdrop, TRUE, WA_Borderless, TRUE, WA_Activate, TRUE, WA_RMBTrap, TRUE, WA_NoCareRefresh, TRUE, WA_SimpleRefresh,
@@ -168,10 +251,21 @@ int amiga_ui_open(int width, int height, const char* title, int* outWidth, int* 
     {
         CloseScreen(s_screen);
         s_screen = NULL;
+        free_aga();
         return 0;
     }
     s_width = s_screen->Width;
     s_height = s_screen->Height;
+    if (s_agaBitmap)
+    {
+        int plane;
+        /* Intuition may have filled the backdrop. Start both Fast copies
+         * from the real bitmap so partial-word edges preserve its pixels. */
+        WaitBlit();
+        for (plane = 0; plane < 8; ++plane)
+            memcpy(s_agaPlanes + plane * s_agaPlaneSize, s_agaBitmap->Planes[plane], (size_t)s_agaPlaneSize);
+        memcpy(s_agaShadow, s_agaPlanes, (size_t)(8 * s_agaPlaneSize));
+    }
     *outWidth = s_width;
     *outHeight = s_height;
     trace("ui: screen %ldx%ld depth %ld open", s_width, s_height, s_screen->RastPort.BitMap->Depth, 0);
@@ -194,6 +288,7 @@ void amiga_ui_close(void)
         s_screen = NULL;
         amiga_trace("ui: screen closed");
     }
+    free_aga();
 }
 
 int amiga_ui_is_open(void)
@@ -234,6 +329,7 @@ static int s_blitMethod = -1;
 
 int amiga_ui_blit_method(void)
 {
+    if (s_agaBitmap) return 2;
     return s_blitMethod;
 }
 
@@ -268,6 +364,16 @@ void amiga_ui_blit(const unsigned char* src, int srcPitch, int x, int y, int w, 
         return;
     if (x < 0 || y < 0 || x + w > s_width || y + h > s_height)
         return;
+    if (s_agaBitmap)
+    {
+        uint8_t* chip[8];
+        int plane;
+        for (plane = 0; plane < 8; ++plane) chip[plane] = s_agaBitmap->Planes[plane];
+        amiga_c2p8_rect(src, srcPitch, s_agaPlanes, s_agaPitch, s_agaPlaneSize, x, y, w, h);
+        WaitBlit();
+        amiga_c2p8_present(s_agaPlanes, s_agaShadow, chip, s_agaPitch, s_agaPlaneSize, x, y, w, h);
+        return;
+    }
     if (s_blitMethod < 0)
     {
         char v[16];

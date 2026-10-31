@@ -283,3 +283,37 @@ visual confirmation at 2x/4x remains required.
 Memory remains above the original target: the tester's running game reports
 roughly 90-107 MiB of heap footprint before executable/OS costs. A 64 MB
 playable release is not established by the capacity profile or these tests.
+
+### Experimental native AGA display (0.20)
+
+`OPENRCT2_DISPLAY=AGA` selects a fixed PAL 640x512 interlaced, 256-colour
+screen. `OpenRCT2-AGA` sets it for the normal launch script and unsets it
+after a normal return. Without that selection the existing RTG backend is
+used. AGA selection bypasses cybergraphics.library opening and all RTG mode
+queries. It requires an available PAL hires-lace mode supporting eight
+planes; unavailable modes fail rather than silently selecting RTG.
+
+The custom bitmap has eight non-interleaved planes in Chip RAM.
+Its depth, stride/layout and Chip placement are checked. The OS owns the
+screen/copper handling; the supplied bitmap is freed after screen closure.
+Two contiguous Fast-RAM blocks hold working planes and a shadow of the
+display. At 640x512 these are 320 KiB each, plus a 320 KiB Chip bitmap.
+The existing chunky framebuffer remains in Fast RAM.
+
+The converter adapts Ami3D's `src/c2p.c` transpose to all eight planes,
+retaining its full 256-colour palette. Aligned 32-pixel groups use the
+transpose; partial edges preserve surrounding bits without reading outside
+the source rectangle. Only dirty regions are converted. Following Ami3D's
+PLANAR5FS approach, only longwords differing from the screen shadow are
+written to Chip RAM. Startup copies the actual Intuition backdrop into both
+Fast copies so the first partial update is also coherent.
+
+The independent pixel-reference test covers all 256 indices, a complete PAL
+frame, 130 partial updates, source/destination padding, guard bytes and zero
+writes on unchanged presentations. It passes host ASan/UBSan (leak checking
+disabled for this container) and native 68060/no-FPU/dirty-heap/sanitizer.
+These conversion tests do not exercise a real custom screen, copper or
+display DMA. The prototype is single buffered; interlace flicker and tearing
+are possible. AGA WinUAE/hardware validation and speed measurements remain
+required. Use the working RTG test's RAM allocation initially; this does not
+establish that the full game fits 128 MB or the original 64 MB target.

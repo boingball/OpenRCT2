@@ -178,7 +178,8 @@ public:
                     "gfx: %u frames in %u ms = %u.%02u fps; rasterise %u ms, blit %u ms for %lu kpx (%s); viewport paints %u: "
                     "generate %u, sort %u, draw %u ms, %u columns",
                     frames, dt, dt ? frames * 1000u / dt : 0u, dt ? (frames * 100000u / dt) % 100u : 0u, _msRaster, _msBlit,
-                    _pxBlit / 1000ul, amiga_ui_blit_method() == 1 ? "direct" : "chunky", gViewportPaintStat[0],
+                    _pxBlit / 1000ul, amiga_ui_blit_method() == 2 ? "AGA c2p8" :
+                        (amiga_ui_blit_method() == 1 ? "direct" : "chunky"), gViewportPaintStat[0],
                     gViewportPaintStat[1], gViewportPaintStat[2], gViewportPaintStat[3], gViewportPaintStat[4])
                     .c_str());
             for (auto& v : gViewportPaintStat)

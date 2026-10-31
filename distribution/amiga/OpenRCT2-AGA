@@ -1,0 +1,12 @@
+; Experimental PAL AGA 640x512 interlaced, 256 colours. Start in the game drawer.
+.key RCT2DIR
+.def RCT2DIR "RCT2:"
+Failat 21
+If NOT EXISTS "OpenRCT2"
+  Echo "Start this script from inside the OpenRCT2 drawer."
+  Quit 10
+EndIf
+SetEnv OPENRCT2_DISPLAY AGA
+Echo "OpenRCT2: experimental PAL AGA 640x512 interlaced, 256 colours."
+Execute OpenRCT2 "<RCT2DIR>"
+UnsetEnv OPENRCT2_DISPLAY
