@@ -12,6 +12,10 @@
     #include "amiga_audio.h"
 
     #include <devices/ahi.h>
+    #include <devices/audio.h>
+    #include <exec/execbase.h>
+    #include <inline/alib.h>
+    #include "amiga_paula_pcm.h"
     #include <dos/dostags.h>
     #include <exec/memory.h>
     #include <proto/dos.h>
@@ -27,7 +31,7 @@ static volatile unsigned char* g_ring = NULL;
 static volatile unsigned long g_head = 0; /* bytes written by the main loop */
 static volatile unsigned long g_tail = 0; /* bytes consumed by the audio process */
 static volatile int g_quit = 0;
-static volatile int g_status = 0; /* 0 starting, 1 running, -1 failed to open AHI, 2 finished */
+static volatile int g_status = 0; /* 0 starting, 1 running, -1 failed to open output, 2 finished */
 static volatile unsigned g_written = 0, g_underruns = 0;
 static volatile int g_fed = 0; /* set by the pump; an underrun counts once per stall after real audio was queued */
 static struct Task* g_mainTask = NULL;
@@ -38,26 +42,13 @@ static unsigned g_lastPumpMs = 0;
 static unsigned long g_targetBytes = REQ_FRAMES * 4 * 2;
 extern unsigned amiga_ticks_ms(void);
 
-int amiga_audio_available(void)
+/* Device ownership belongs to the playback process. Defer probing until open;
+ * in particular a forced Paula launch must never touch ahi.device. */
+static int g_paula = 0;
+int amiga_audio_available(void) { return 1; }
+const char* amiga_audio_backend(void)
 {
-    struct MsgPort* port = CreateMsgPort();
-    struct AHIRequest* req;
-    int ok = 0;
-    if (port == NULL)
-        return 0;
-    req = (struct AHIRequest*)CreateIORequest(port, sizeof(struct AHIRequest));
-    if (req != NULL)
-    {
-        req->ahir_Version = 4;
-        if (OpenDevice((STRPTR)AHINAME, AHI_DEFAULT_UNIT, (struct IORequest*)req, 0) == 0)
-        {
-            CloseDevice((struct IORequest*)req);
-            ok = 1;
-        }
-        DeleteIORequest((struct IORequest*)req);
-    }
-    DeleteMsgPort(port);
-    return ok;
+    return g_paula ? "Paula (audio.device, 8-bit stereo)" : "AHI (ahi.device unit 0)";
 }
 
 /* Take up to `bytes` from the ring into dst, padding with silence. Returns the bytes that came from the ring. */
@@ -75,7 +66,7 @@ static unsigned long ring_take(unsigned char* dst, unsigned long bytes)
     return n;
 }
 
-static void audio_process(void)
+static void ahi_process(void)
 {
     struct MsgPort* port = CreateMsgPort();
     struct AHIRequest* req[2] = { NULL, NULL };
@@ -148,7 +139,116 @@ static void audio_process(void)
     Signal(g_mainTask, 1L << g_sigDone);
 }
 
-int amiga_audio_open(int freq, int frames, int numBuffers)
+/* Like MintAMP's Paula stream: two writes per stereo channel, Chip buffers,
+ * BeginIO preserving ADIOF_PERVOL, and reap every submitted request before
+ * freeing it. Keep the OS running: audio.device arbitrates the channels. */
+static void paula_process(void)
+{
+    struct MsgPort* port = CreateMsgPort();
+    struct IOAudio* owner = NULL;
+    struct IOAudio* req[2][2] = {{NULL, NULL}, {NULL, NULL}};
+    unsigned char* chip[2] = {NULL, NULL};
+    unsigned char* pcm = NULL;
+    int pending[2][2] = {{0, 0}, {0, 0}};
+    UBYTE channels[] = {3}; /* channel 0 left, channel 1 right, as in MintAMP */
+    int opened = 0, ready = 0, i, ch, cur = 0;
+    ULONG clock = SysBase->ex_EClockFrequency * 5UL;
+    UWORD period;
+    if (clock == 0) clock = 3546895UL;
+    period = (UWORD)((clock + (ULONG)g_freq / 2) / (ULONG)g_freq);
+    if (period < 124) period = 124;
+    if (port)
+    {
+        owner = (struct IOAudio*)CreateIORequest(port, sizeof(struct IOAudio));
+        pcm = (unsigned char*)AllocMem(REQ_FRAMES * 4, MEMF_PUBLIC);
+        for (i = 0; i < 2; ++i)
+        {
+            chip[i] = (unsigned char*)AllocMem(REQ_FRAMES * 2, MEMF_CHIP | MEMF_CLEAR);
+            for (ch = 0; ch < 2; ++ch)
+                req[i][ch] = (struct IOAudio*)CreateIORequest(port, sizeof(struct IOAudio));
+        }
+    }
+    if (owner && pcm && chip[0] && chip[1] && req[0][0] && req[0][1] && req[1][0] && req[1][1])
+    {
+        owner->ioa_Request.io_Message.mn_Node.ln_Pri = ADALLOC_MINPREC;
+        owner->ioa_Request.io_Flags = ADIOF_NOWAIT;
+        owner->ioa_Data = channels;
+        owner->ioa_Length = sizeof channels;
+        if (OpenDevice((STRPTR)AUDIONAME, 0, (struct IORequest*)owner, 0) == 0)
+        {
+            opened = ready = 1;
+            for (i = 0; i < 2; ++i)
+                for (ch = 0; ch < 2; ++ch)
+                {
+                    /* Do not copy an opened message's list links into a fresh request. */
+                    req[i][ch]->ioa_Request.io_Device = owner->ioa_Request.io_Device;
+                    req[i][ch]->ioa_Request.io_Unit = (struct Unit*)(1UL << ch);
+                    req[i][ch]->ioa_AllocKey = owner->ioa_AllocKey;
+                }
+        }
+    }
+    g_status = ready ? 1 : -1;
+    Signal(g_mainTask, 1L << g_sigReady);
+    while (ready && !g_quit)
+    {
+        for (ch = 0; ch < 2; ++ch)
+            if (pending[cur][ch])
+            {
+                WaitIO((struct IORequest*)req[cur][ch]);
+                pending[cur][ch] = 0;
+                if (req[cur][ch]->ioa_Request.io_Error) ready = 0;
+            }
+        if (!ready || g_quit) break;
+        if (ring_take(pcm, REQ_FRAMES * 4) < REQ_FRAMES * 4)
+        {
+            if (g_fed) ++g_underruns;
+            g_fed = 0;
+        }
+        amiga_paula_split(pcm, chip[cur], chip[cur] + REQ_FRAMES, REQ_FRAMES);
+        for (ch = 0; ch < 2; ++ch)
+        {
+            struct IOAudio* r = req[cur][ch];
+            r->ioa_Request.io_Command = CMD_WRITE;
+            r->ioa_Request.io_Flags = ADIOF_PERVOL;
+            r->ioa_Request.io_Error = 0;
+            r->ioa_Data = chip[cur] + ch * REQ_FRAMES;
+            r->ioa_Length = REQ_FRAMES;
+            r->ioa_Period = period;
+            r->ioa_Volume = 64;
+            r->ioa_Cycles = 1;
+            BeginIO((struct IORequest*)r);
+            pending[cur][ch] = 1;
+        }
+        ++g_written;
+        cur ^= 1;
+    }
+    /* Abort all writes first, then wait for every reply before releasing DMA memory. */
+    for (i = 0; i < 2; ++i)
+        for (ch = 0; ch < 2; ++ch)
+            if (pending[i][ch]) AbortIO((struct IORequest*)req[i][ch]);
+    for (i = 0; i < 2; ++i)
+        for (ch = 0; ch < 2; ++ch)
+            if (pending[i][ch]) WaitIO((struct IORequest*)req[i][ch]);
+    if (opened) CloseDevice((struct IORequest*)owner);
+    for (i = 0; i < 2; ++i)
+    {
+        for (ch = 0; ch < 2; ++ch)
+            if (req[i][ch]) DeleteIORequest((struct IORequest*)req[i][ch]);
+        if (chip[i]) FreeMem(chip[i], REQ_FRAMES * 2);
+    }
+    if (pcm) FreeMem(pcm, REQ_FRAMES * 4);
+    if (owner) DeleteIORequest((struct IORequest*)owner);
+    if (port) DeleteMsgPort(port);
+    g_status = 2;
+    Signal(g_mainTask, 1L << g_sigDone);
+}
+
+static void audio_process(void)
+{
+    if (g_paula) paula_process(); else ahi_process();
+}
+
+static int open_backend(int freq, int frames, int numBuffers)
 {
     (void)frames;
     (void)numBuffers;
@@ -188,6 +288,22 @@ int amiga_audio_open(int freq, int frames, int numBuffers)
     }
     g_open = 1;
     return 1;
+}
+
+int amiga_audio_open(int freq, int frames, int numBuffers)
+{
+    char mode[16] = {0};
+    int forcedPaula, forcedAHI;
+    GetVar((STRPTR)"OPENRCT2_AUDIO", mode, sizeof mode - 1, 0);
+    forcedPaula = (!strcmp(mode, "PAULA") || !strcmp(mode, "paula"));
+    forcedAHI = (!strcmp(mode, "AHI") || !strcmp(mode, "ahi"));
+    /* A running worker must stop before its backend selector changes. */
+    amiga_audio_close();
+    g_paula = forcedPaula;
+    if (open_backend(freq, frames, numBuffers)) return 1;
+    if (forcedPaula || forcedAHI) return 0;
+    g_paula = 1;
+    return open_backend(freq, frames, numBuffers);
 }
 
 int amiga_audio_pump(amiga_audio_fill_fn fill, void* user)

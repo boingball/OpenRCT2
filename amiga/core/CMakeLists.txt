@@ -9,6 +9,7 @@ target_include_directories(openrct2-core-probe PRIVATE "${ROOT_DIR}/src")
 target_compile_definitions(openrct2-core-probe PRIVATE $<$<BOOL:${OPENRCT2_SMALL_MEMORY}>:OPENRCT2_SMALL_MEMORY>)
 
 if (AMIGA)
+    add_executable(openrct2-paula-pcm-test tests/paula_pcm.c)
     add_executable(openrct2-c2p8-test tests/c2p8.c
         "${ROOT_DIR}/src/openrct2-ui/platform/amiga/amiga_c2p8.c")
     add_executable(openrct2-rle-zoom-test tests/rle_zoom.cpp

@@ -26,7 +26,6 @@ namespace
     bool g_paused = true;
     int g_lock = 0;
     bool g_inPump = false;
-    const char* g_deviceName = "AHI (ahi.device unit 0)";
     // Debug: OPENRCT2_AUDIO_DUMP=<file> bypasses AHI. Buffers are consumed at real-time pace and the mixed
     // S16 big-endian stereo stream is appended to <file>, so the mixer can be verified on an emulator
     // whose Paula/AHI playback does not complete requests.
@@ -150,7 +149,7 @@ SDL_AudioDeviceID SDL_OpenAudioDevice(const char*, int iscapture, const SDL_Audi
     }
     if (!g_dump && !amiga_audio_open(freq, frames, 3))
     {
-        amiga_trace("audio: amiga_audio_open failed (no AHI unit 0?)");
+        amiga_trace("audio: audio output open failed (AHI/Paula unavailable or selected backend busy)");
         return 0;
     }
     g_spec = *desired;
@@ -164,7 +163,10 @@ SDL_AudioDeviceID SDL_OpenAudioDevice(const char*, int iscapture, const SDL_Audi
         *obtained = g_spec;
     g_open = true;
     g_paused = true;
-    amiga_trace("audio: AHI opened, 22050 Hz S16 stereo, own playback process, 93 ms requests, ring 743 ms");
+    char line[192];
+    std::snprintf(line, sizeof line, "audio: %s opened, mixer %d Hz S16 stereo, own playback process",
+        g_dump ? "DUMP" : amiga_audio_backend(), freq);
+    amiga_trace(line);
     return 1;
 }
 
@@ -196,7 +198,7 @@ void SDL_CloseAudioDevice(SDL_AudioDeviceID dev)
         else
         {
             amiga_audio_close();
-            amiga_trace("audio: AHI closed");
+            amiga_trace("audio: output closed");
         }
         g_open = false;
         g_paused = true;
@@ -208,7 +210,7 @@ int SDL_GetNumAudioDevices(int iscapture)
 }
 const char* SDL_GetAudioDeviceName(int index, int iscapture)
 {
-    return (index == 0 && !iscapture) ? g_deviceName : nullptr;
+    return (index == 0 && !iscapture) ? amiga_audio_backend() : nullptr;
 }
 
 void SDL_amiga_AudioPump(void)

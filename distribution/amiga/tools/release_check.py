@@ -2,7 +2,7 @@
 
     python3 release_check.py <path to 68k openrct2 binary>
 
-Scenes (each a fresh guest): title screen (AHI open, load time, fps, audio health), audio dump (mixed
+Scenes (each a fresh guest): title screen (audio output open, load time, fps, audio health), audio dump (mixed
 stream is not silent), Crazy Castle (static fps, scrolling fps, blit sanity), Kahuna Point (tick cost with
 1,560 guests). Thresholds are for the Amigo 68040 emulator on a mostly idle Mac.
 """
@@ -29,8 +29,8 @@ print("[1/4] title screen", flush=True)
 a = fresh_game(BIN, "Work:OpenRCT2/run-ui-rc")  # like run-ui, but records the program's return code in rc.txt
 t = wait_trace(a, lambda t: t.count("gfx: 100") >= 3, limit=420)
 lines = t.splitlines()
-ahi = [l for l in lines if "audio: AHI opened" in l]
-check("AHI opened", bool(ahi), ahi[0][ahi[0].index("audio"):][:60] if ahi else "no 'audio: AHI opened' line")
+output = [l for l in lines if re.search(r"audio: (?:AHI|Paula)(?: \(.*?\))? opened", l)]
+check("audio output opened", bool(output), output[0][output[0].index("audio"):][:100] if output else "no AHI/Paula opened line")
 obj = [l for l in lines if "objects:" in l and "required loaded" in l]
 if obj:
     ms = int(re.search(r"loaded in (\d+) ms", obj[0]).group(1))

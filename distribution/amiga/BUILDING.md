@@ -97,3 +97,15 @@ The launcher keeps the original-data check and removes the FPU requirement.
 `openrct2-soft-float-test` exercises nonconstant floating-point math, numeric
 formatting/parsing, shared pointers and static destruction. Run it and the
 native allocator test with the emulated FPU disabled.
+
+Paula output tests (0.21):
+```
+cmake --build build/nofpu18 --target openrct2-paula-pcm-test
+# Host fault injection compiles the actual production Paula worker:
+gcc -std=c11 -O1 -g -Wall -Wextra -fsanitize=address,undefined \
+  -D__amigaos__ -Iamiga/core/tests/paula_mock \
+  amiga/core/tests/paula_lifecycle.c -o /tmp/paula-lifecycle
+ASAN_OPTIONS=detect_leaks=0 /tmp/paula-lifecycle
+```
+The mocked lifecycle test does not validate physical audio.device timing.
+Select `OPENRCT2_AUDIO=PAULA` at runtime to bypass AHI completely.

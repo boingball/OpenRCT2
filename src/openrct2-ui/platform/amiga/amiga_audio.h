@@ -1,8 +1,7 @@
 /*****************************************************************************
- * AmigaOS audio output through ahi.device (AHI): a small double-buffered
- * CMD_WRITE stream that the main loop pumps. Plain C, no threads: the game has
- * no gthreads on libnix, so the mixer callback runs on the main task whenever
- * a buffer has been played and needs refilling.
+ * AmigaOS audio output through AHI or Paula audio.device: a double-buffered
+ * stream consumed by a playback process. The mixer runs on the main task
+ * and fills a shared Fast-RAM ring; no C++ callback runs on the audio task.
  *****************************************************************************/
 #pragma once
 #ifdef __cplusplus
@@ -12,10 +11,12 @@ extern "C" {
 /* Fill callback: write exactly `bytes` bytes of interleaved signed 16-bit big-endian stereo into `dst`. */
 typedef void (*amiga_audio_fill_fn)(void* user, unsigned char* dst, int bytes);
 
-/* 1 if ahi.device can be opened (AHI installed and a unit configured), else 0. */
+/* Device probing is deferred to open, in the owning playback process. */
 int amiga_audio_available(void);
+const char* amiga_audio_backend(void);
 
-/* Open unit 0 for `freq` Hz stereo 16-bit output with `numBuffers` buffers of `frames` frames each.
+/* OPENRCT2_AUDIO=PAULA or AHI forces a backend; default tries AHI then Paula.
+ * Open for `freq` Hz stereo 16-bit output with `numBuffers` buffers of `frames` frames each.
  * Returns 1 on success. */
 int amiga_audio_open(int freq, int frames, int numBuffers);
 

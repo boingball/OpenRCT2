@@ -410,7 +410,7 @@ int SDL_Init(Uint32 flags)
     }
     if ((flags & SDL_INIT_AUDIO) && !amiga_audio_available())
     {
-        std::snprintf(g_error, sizeof g_error, "ahi.device unit 0 could not be opened (is AHI installed and configured?)");
+        std::snprintf(g_error, sizeof g_error, "audio output unavailable (AHI/Paula)");
         return -1;
     }
     return 0;

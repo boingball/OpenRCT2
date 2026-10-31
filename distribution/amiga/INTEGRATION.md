@@ -317,3 +317,36 @@ display DMA. The prototype is single buffered; interlace flicker and tearing
 are possible. AGA WinUAE/hardware validation and speed measurements remain
 required. Use the working RTG test's RAM allocation initially; this does not
 establish that the full game fits 128 MB or the original 64 MB target.
+
+### Paula output without AHI (0.21)
+
+The default output tries AHI and falls back to built-in Paula if it cannot
+open. `OPENRCT2_AUDIO=PAULA` selects Paula without probing/opening AHI;
+`OPENRCT2_AUDIO=AHI` retains AHI-only behaviour. `OpenRCT2-Paula` and
+`OpenRCT2-AGA-Paula` select the output for their respective display launcher.
+After a failed launch, unset OPENRCT2_AUDIO before returning to automatic
+selection. OPENRCT2_NO_AUDIO still disables sound.
+
+The existing 22050 Hz, signed 16-bit stereo mixer and WAV/CSS streaming
+remain. The playback process splits its high sample bytes into signed
+8-bit Chip-RAM stereo planes. audio.device owns/arbitrates channels 0/1;
+the code follows MintAMP's two queued writes per channel and BeginIO
+approach. It does not take over hardware, alter the audio filter or require
+an AHI installation. The Paula period is rounded from the machine's E-clock
+(PAL/NTSC), so the output rate is approximate. This first version is 8-bit,
+not a calibrated 14-bit Paula output. It needs an extra 8 KiB Chip RAM.
+
+Shutdown aborts every submitted request and waits for its reply before
+closing the device or freeing DMA buffers. A host test exercises the actual
+Paula worker against mocked Exec/device calls: normal queue/stop/reap/free,
+every allocation failure and device-open failure. ASan/UBSan passes. The
+PCM reference test covers all high-byte values, distinct stereo channels,
+unaligned source and output guards, including native no-FPU testing.
+These tests do not establish audible playback, hardware timing or AGA/audio
+contention. WinUAE listening and real hardware testing remain required.
+
+Ogg decoding is still disabled for this Amiga build. Original RCT2 WAV/CSS
+music/effects do not require it. Classic assets and Ogg custom music would
+need a decoder. MintAMP uses fixed-point Tremor, but its sequential adapter
+does not implement the seek/loop behaviour required here; do not transplant
+that adapter unchanged or enable floating-point libvorbis for this target.
