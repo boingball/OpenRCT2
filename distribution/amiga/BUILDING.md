@@ -109,3 +109,21 @@ ASAN_OPTIONS=detect_leaks=0 /tmp/paula-lifecycle
 ```
 The mocked lifecycle test does not validate physical audio.device timing.
 Select `OPENRCT2_AUDIO=PAULA` at runtime to bypass AHI completely.
+
+Experimental LAN/thread build (keep separate from the offline binary):
+```
+AMIGA_CPU_FLAGS='-m68060 -msoft-float' sh distribution/amiga/configure.sh \
+  build/experimental22 /path/to/deps /path/to/open4 \
+  -DOPENRCT2_SMALL_MEMORY=ON -DDISABLE_NETWORK=OFF \
+  -DOPENRCT2_AMIGA_LAN_EXPERIMENT=ON -DOPENRCT2_AMIGA_THREADS=ON \
+  -DOPENRCT2_BUILD_CORE_BENCH=ON
+cmake --build build/experimental22 --target openrct2 \
+  openrct2-job-pool-test openrct2-network-wire-test \
+  openrct2-amilan-bridge-test openrct2-network-crypto-test -j4
+```
+Use an AmiSSL v5 developer SDK in the cross-compiler include directory.
+The runtime is opened lazily; no libamisslauto startup dependency is linked.
+See amiga/core/tests/{amilan_transport,network_fragments,job_pool}.cpp for
+host reference tests. The Amiga bridge test uses an actual synthetic library
+vector and the production assembly. The native worker and crypto tests are
+included for a real AmigaOS/WinUAE test, not marked passed by a version run.

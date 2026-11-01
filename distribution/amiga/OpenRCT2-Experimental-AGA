@@ -1,0 +1,6 @@
+.key RCT2DIR
+.def RCT2DIR "RCT2:"
+Failat 21
+SetEnv OPENRCT2_DISPLAY AGA
+Execute OpenRCT2-Experimental "<RCT2DIR>"
+UnsetEnv OPENRCT2_DISPLAY

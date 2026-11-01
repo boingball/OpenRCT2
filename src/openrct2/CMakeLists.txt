@@ -79,8 +79,20 @@ endif ()
 set_target_properties(libopenrct2 PROPERTIES PREFIX "")
 SET_CHECK_CXX_FLAGS(libopenrct2)
 
+if (AMIGA AND NOT DISABLE_NETWORK)
+    enable_language(ASM)
+    target_sources(libopenrct2 PRIVATE
+        "${ROOT_DIR}/src/thirdparty/amilan/amiga/socket.c"
+        "${ROOT_DIR}/src/thirdparty/amilan/src/protocol.c"
+        "${ROOT_DIR}/src/thirdparty/amilan/src/ipv4_text.c"
+        "${CMAKE_CURRENT_LIST_DIR}/platform/amiga_net_call.S")
+    target_include_directories(libopenrct2 PRIVATE "${ROOT_DIR}/src/thirdparty/amilan/include")
+    target_compile_definitions(libopenrct2 PRIVATE OPENRCT2_AMIGA_LAN_EXPERIMENT)
+endif ()
 if (NOT DISABLE_NETWORK OR NOT DISABLE_HTTP)
-    if (WIN32)
+    if (AMIGA)
+        # SDK OpenSSL calls use AmiSSL library vectors, opened lazily for RSA.
+    elseif (WIN32)
         target_link_libraries(libopenrct2 bcrypt)
     else ()
         if (APPLE AND NOT MACOS_USE_DEPENDENCIES)

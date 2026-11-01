@@ -350,3 +350,49 @@ music/effects do not require it. Classic assets and Ogg custom music would
 need a decoder. MintAMP uses fixed-point Tremor, but its sequential adapter
 does not implement the seek/loop behaviour required here; do not transplant
 that adapter unchanged or enable floating-point libvorbis for this target.
+
+### Experimental job workers and LAN (0.22)
+
+This is a separate executable/profile for testing; do not replace the 0.21
+fallback. Configure OPENRCT2_AMIGA_THREADS=ON, DISABLE_NETWORK=OFF and
+OPENRCT2_AMIGA_LAN_EXPERIMENT=ON, retaining OPENRCT2_SMALL_MEMORY=ON and
+68060/software-float flags. OPENRCT2_AMIGA_THREADS enables blocking allocator
+locks and caps JobPool at two 256-KiB workers. The Multithreading checkbox
+then enables actual viewport jobs, including the X8 parallel drawing path.
+Other job-pool users (such as loading) can use workers independently of the
+checkbox. No multicore 68060 speedup is promised.
+
+The socket interface delegates raw transport to the AmiLAN Amiga backend.
+OpenRCT2 retains its existing protocol, RSA authentication, map transfer,
+commands, tick checksums and LAN discovery datagrams. No AmiLAN framing or
+512-byte message limit is imposed on OpenRCT2's stream. Numeric IPv4 only;
+no DNS/IPv6, internet master listing, HTTP object downloads or scripting.
+The socket API is owned by the OS task using it. Accepted sockets share
+the listener's library base; all descriptors close before the base.
+
+The constrained build appends -amiga-small-v1 to the existing network version
+so standard/Thomas builds cannot inadvertently join with different caps.
+This is a compatibility gate, not proof of determinism. Test two identical
+0.22 builds with a small park first. Existing map/entity/ride/tile caps remain.
+
+AmiSSL v5/OpenSSL 3 API is opened lazily for OpenRCT2 RSA operations. Its
+entropy and RSA checks remain in place; no authentication bypass is added.
+The RCT1 patch SHA256 uses the existing picosha2 path on Amiga so ordinary
+single-player patching does not require AmiSSL. Crypto cleanup occurs after
+C++ teardown and before allocator cleanup. The SDK headers are needed at
+build time; an installed compatible AmiSSL runtime is needed for networking.
+
+Host ASan/UBSan checks cover the actual job pool, real TCP 1 MiB partial I/O,
+accepted-socket lifetime, EOF, invalid address, raw UDP and the actual packet
+serializer/parser using two-byte writes and one-byte reads. That last check
+also covers a repaired short-header read in Connection::readPacket().
+Native no-FPU checks pass fixed Packet bytes, the actual assembly library
+bridge and GUI version/startup/shutdown. The native worker test is blocked
+by volamos's unimplemented CreateNewProc. The crypto test reports missing
+AmiSSL there. Audible audio, graphical worker stability, live AmiSSL/RSA,
+Amiga sockets, join/map transfer and sustained synchronisation require
+WinUAE/hardware tests; multiplayer is not yet validated end to end.
+
+On Amiga the client opens TCP after generating/loading its local key, so a
+slow first-time RSA generation does not consume the server handshake timeout.
+Key generation failure stops the join; it is not treated as a valid identity.

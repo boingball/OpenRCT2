@@ -35,7 +35,7 @@
 #include "../world/tile_element/TileElementType.h"
 #include "../world/tile_element/TrackElement.h"
 
-#ifdef DISABLE_NETWORK
+#if defined(DISABLE_NETWORK) || defined(__amigaos__)
     #include <picosha2.hpp>
 #else
     #include "../core/Crypt.h"
@@ -753,7 +753,7 @@ static void ApplyPathFixes(const json_t& scenarioPatch)
 static u8string getScenarioSHA256(u8string_view scenarioPath)
 {
     auto scenarioData = File::ReadAllBytes(scenarioPath);
-#ifdef DISABLE_NETWORK
+#if defined(DISABLE_NETWORK) || defined(__amigaos__)
     auto scenarioStringHash = picosha2::hash256_hex_string(scenarioData);
 #else
     auto scenarioHash = Crypt::SHA256(scenarioData.data(), scenarioData.size());

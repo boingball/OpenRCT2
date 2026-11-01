@@ -27,6 +27,7 @@
     #include <cstring>
     #include <iterator>
     #include <memory>
+    #include <future>
     #include <random>
     #include <string>
 

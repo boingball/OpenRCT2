@@ -49,7 +49,11 @@
 
 constexpr uint8_t kStreamVersion = 1;
 
-const std::string kStreamID = std::string(kOpenRCT2Version) + "-" + std::to_string(kStreamVersion);
+const std::string kStreamID = std::string(kOpenRCT2Version) + "-" + std::to_string(kStreamVersion)
+#if defined(OPENRCT2_AMIGA_LAN_EXPERIMENT) && defined(OPENRCT2_SMALL_MEMORY)
+    + "-amiga-small-v1"
+#endif
+    ;
 
 static OpenRCT2::Peep* _pickup_peep = nullptr;
 static int32_t _pickup_peep_old_x = kLocationNull;
@@ -269,7 +273,9 @@ namespace OpenRCT2::Network
 
         _serverConnection = std::make_unique<Connection>();
         _serverConnection->socket = CreateTcpSocket();
+#ifndef __amigaos__
         _serverConnection->socket->ConnectAsync(host, port);
+#endif
         _serverState.gamestateSnapshotsEnabled = false;
 
         status = Status::connecting;
@@ -290,7 +296,7 @@ namespace OpenRCT2::Network
         {
             Console::WriteLine("Generating key... This may take a while");
             Console::WriteLine("Need to collect enough entropy from the system");
-            _key.Generate();
+            if (!_key.Generate()) { Close(); return false; }
             Console::WriteLine("Key generated, saving private bits as %s", keyPath.c_str());
 
             const auto keysDirectory = GetKeysDirectory();
@@ -345,9 +351,18 @@ namespace OpenRCT2::Network
 
             // Don't store private key in memory when it's not in use.
             _key.Unload();
+#ifdef __amigaos__
+            if (!ok) { Close(); return false; }
+            _serverConnection->socket->ConnectAsync(host, port);
+#endif
             return ok;
         }
 
+#ifdef __amigaos__
+        // First-time RSA generation on 68k can outlast the server handshake timeout.
+        // Open the TCP connection only once the local identity is ready.
+        _serverConnection->socket->ConnectAsync(host, port);
+#endif
         return true;
     }
 

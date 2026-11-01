@@ -122,7 +122,8 @@ option(OPENRCT2_AMIGA_THREADS "Experimental Amiga job workers (maximum two, 256 
 option(OPENRCT2_AMIGA_OPEN4_RUNTIME "Use tested OpenAmigaGCC open4 runtime adapters" ON)
 option(OPENRCT2_SMALL_MEMORY "Use original RCT2 park capacities for constrained-memory port investigation" OFF)
 option(OPENRCT2_BUILD_CORE_BENCH "Build a standalone headless simulation benchmark" OFF)
-if(OPENRCT2_SMALL_MEMORY AND NOT DISABLE_NETWORK)
+option(OPENRCT2_AMIGA_LAN_EXPERIMENT "Experimental matching-profile AmiLAN multiplayer" OFF)
+if(OPENRCT2_SMALL_MEMORY AND NOT DISABLE_NETWORK AND NOT (AMIGA AND OPENRCT2_AMIGA_LAN_EXPERIMENT))
     message(FATAL_ERROR "OPENRCT2_SMALL_MEMORY is experimental and offline-only; set DISABLE_NETWORK=ON")
 endif()
 
