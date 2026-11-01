@@ -487,3 +487,29 @@ the same check. Full host/client join remains a tester gate: the previous
 logs ended cleanly before any network map import and did not capture the
 reported crash. PNG import bad_alloc warnings on that client are a separate
 unresolved issue; this change does not claim to fix them.
+
+## 0.25: AGA conversion and live threading toggle
+
+On a physical 68060 AGA test, Electric Fields loaded all 563 objects and
+ran with roughly 14 MB system memory free. The log ended with allocator
+FOOTERS failures when the tester unticked Multithreading. It does not
+establish whether earlier painting or worker teardown damaged memory.
+
+On Amiga, switching rendering workers off now drains and parks the pool
+instead of destroying tasks/TLS inside a live viewport paint. OFF paints
+on the caller; ON reuses the existing workers. Their two 256-KiB stacks
+remain allocated until normal shutdown. This avoids the reported live
+teardown trigger; it is a workaround, not proof that the underlying heap
+corruption is eliminated. Test clean exit as well as switching off/on.
+
+AGA's big-endian sprite transpose now loads each four-byte input with
+memcpy instead of separately assembling bytes with shifts. GCC emits
+longword loads; memcpy preserves C alignment/aliasing semantics for padded
+or unaligned scanlines. The host path remains explicit big-endian.
+The full native C2P pixel reference, clipping, stride and guard tests pass.
+
+amiga/core/tests/c2p8_bench.c converts 24 full PAL frames and hashes the
+result. Before/after emulator timing uses the same flags, no FPU, dirty
+heap and sanitizer; emulator timing is not physical Chip-RAM bandwidth
+or a gameplay FPS claim. Real hardware AGA conversion timing, thread
+toggle stability and multiplayer completion remain tester gates.

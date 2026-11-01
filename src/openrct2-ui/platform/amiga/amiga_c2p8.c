@@ -10,7 +10,16 @@
 
 static uint32_t load_be(const uint8_t* p)
 {
+#ifdef __m68k__
+    /* The source is already big-endian. memcpy permits unaligned scanlines
+     * without aliasing/alignment UB and GCC emits one 68020+ longword load.
+     * The byte/shift form otherwise emits four loads and three shifts. */
+    uint32_t value;
+    memcpy(&value, p, sizeof(value));
+    return value;
+#else
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
+#endif
 }
 
 static void store_be(uint8_t* p, uint32_t value)
