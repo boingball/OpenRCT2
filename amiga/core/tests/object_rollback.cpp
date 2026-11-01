@@ -22,20 +22,20 @@ struct TestObject final : Object
 };
 struct Repository final : IObjectRepository
 {
-    ObjectRepositoryItem items[2]{};
+    ObjectRepositoryItem items[3]{};
     Repository()
     {
-        for (int i = 0; i < 2; ++i)
+        for (int i = 0; i < 3; ++i)
         {
             items[i].Id = i;
-            items[i].Type = ObjectType::music;
+            items[i].Type = i == 2 ? ObjectType::audio : ObjectType::music;
             items[i].Generation = ObjectGeneration::json;
-            items[i].Identifier = i ? "test.music.second" : "test.music.first";
+            items[i].Identifier = i == 2 ? "test.audio.keep" : i ? "test.music.second" : "test.music.first";
         }
     }
     void LoadOrConstruct(int32_t) override {}
     void Construct(int32_t) override {}
-    size_t GetNumObjects() const override { return 2; }
+    size_t GetNumObjects() const override { return 3; }
     const ObjectRepositoryItem* GetObjects() const override { return items; }
     const ObjectRepositoryItem* FindObjectLegacy(std::string_view id) const override { return FindObject(id); }
     const ObjectRepositoryItem* FindObject(std::string_view id) const override
@@ -64,14 +64,28 @@ int main()
     Repository repository;
     auto manager = CreateObjectManager(repository);
     ObjectList list;
-    for (const auto& item : repository.items) list.Add(ObjectEntryDescriptor(item));
+    for (int i = 0; i < 2; ++i) list.Add(ObjectEntryDescriptor(repository.items[i]));
     try { manager->LoadObjects(list); assert(false); } catch (const std::bad_alloc&) {}
     assert(live == 0 && activated == 0);
     for (const auto& item : repository.items) assert(!item.LoadedObject);
     fail = false;
     manager->LoadObjects(list);
     assert(live == 2 && activated == 2);
+    // A static menu must release the former park while keeping the shared
+    // audio object. Exercise unload/reload cycles through the actual manager.
+    auto* audio = manager->LoadObject("test.audio.keep");
+    assert(audio != nullptr && live == 3 && activated == 3);
+    for (int i = 0; i < 3; ++i)
+    {
+        manager->UnloadAllTransient();
+        assert(live == 1 && activated == 1);
+        assert(!repository.items[0].LoadedObject && !repository.items[1].LoadedObject);
+        assert(repository.items[2].LoadedObject.get() == audio);
+        manager->LoadObjects(list);
+        assert(live == 3 && activated == 3);
+        assert(repository.items[2].LoadedObject.get() == audio);
+    }
     manager->UnloadAll();
     assert(live == 0 && activated == 0);
-    puts("Object load: injected bad_alloc rolls back repository/activation; retry and shutdown PASS");
+    puts("Object load: injected bad_alloc rolls back repository/activation; retry, transient park release/audio retention, repeated reload and shutdown PASS");
 }

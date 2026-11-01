@@ -24,6 +24,7 @@
 #include "../../interface/Screenshot.h"
 #include "../../interface/Window.h"
 #include "../../network/NetworkBase.h"
+#include "../../object/ObjectManager.h"
 #include "../../scenario/ScenarioRepository.h"
 #include "../../scenes/SceneManager.h"
 #include "../../ui/UiContext.h"
@@ -116,6 +117,17 @@ void TitleScene::Load()
 #endif
     gameStateInitAll(getGameState(), kDefaultMapSize);
     ContextResetSubsystems();
+#if defined(__amigaos__) && defined(OPENRCT2_SMALL_MEMORY)
+    if (AmigaSkipTitlePark())
+    {
+        // The old scene has stopped, the map/entities have been reset and
+        // park windows are closed. A static menu has no park that needs these
+        // sprites. Release them before a preview/import allocates its buffers.
+        AMIGA_TRACE_HEAP("static menu before park objects released");
+        GetContext().GetObjectManager().UnloadAllTransient();
+        AMIGA_TRACE_HEAP("static menu after park objects released");
+    }
+#endif
     ContextOpenWindow(WindowClass::mainWindow);
 
     TitleInitialise();

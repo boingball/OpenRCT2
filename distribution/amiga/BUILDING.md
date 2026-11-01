@@ -148,3 +148,19 @@ and compiler. This verifies argument delivery, not physical screen creation.
 Screen failures now report the failing stage, OS screen error code and
 free/largest Chip RAM. A top-level exception handler unwinds owned contexts
 and returns 20 to Shell instead of calling abort for a startup exception.
+
+### Static-menu park release (0.27)
+
+On the Amiga small-memory profile, entering the static title menu calls
+`UnloadAllTransient()` after the previous scene stops, the game state resets
+and park windows close. Audio objects remain loaded. Without this step, the
+static title bypasses the sequence load that ordinarily replaces old objects;
+a second scenario's classification/preview/import has to coexist with the
+previous park's sprite data. The tester log retained roughly 76 MB in use
+at the menu versus 38 MB on first startup, then reported `std::bad_alloc`.
+
+`openrct2-object-rollback-test` exercises the production ObjectManager with
+injected allocation failure, repeated transient unload/reload, retained audio
+identity and final cleanup. Hardware menu/second-park testing remains needed.
+Use `OpenRCT2-A1200` to select the static menu and Paula. No simulation or
+rendering algorithm changes are included in 0.27.
