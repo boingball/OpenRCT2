@@ -15,6 +15,10 @@
 #include "drawing/BitmapReader.h"
 
 #include <memory>
+#ifdef __amigaos__
+    #include "platform/amiga/amiga_ui.h"
+    #include <cstdio>
+#endif
 #include <openrct2/Context.h>
 #include <openrct2/platform/AmigaTrace.h>
 #include <openrct2/Diagnostic.h>
@@ -74,6 +78,8 @@ int main(int argc, const char** argv)
         AMIGA_TRACE((std::string("terminate: uncaught exception: ") + what).c_str());
         std::abort();
     });
+    try
+    {
 #endif
     auto runGame = CommandLineRun(argv, argc);
     RegisterBitmapReader();
@@ -110,6 +116,18 @@ int main(int argc, const char** argv)
         rc = EXIT_FAILURE;
     }
     AMIGA_TRACE("main: context shut down, exiting");
+#ifdef __amigaos__
+    }
+    catch (const std::exception& e)
+    {
+        // A failed screen/window open must unwind normally and return to the
+        // launcher, rather than entering the runtime abort requester.
+        AMIGA_TRACE(e.what());
+        std::fprintf(stderr, "OpenRCT2: %s\n", e.what());
+        amiga_ui_close();
+        return 20;
+    }
+#endif
     return rc;
 }
 

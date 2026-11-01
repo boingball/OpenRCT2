@@ -127,3 +127,24 @@ See amiga/core/tests/{amilan_transport,network_fragments,job_pool}.cpp for
 host reference tests. The Amiga bridge test uses an actual synthetic library
 vector and the production assembly. The native worker and crypto tests are
 included for a real AmigaOS/WinUAE test, not marked passed by a version run.
+
+### Explicit OS tag lists (0.26)
+
+Use `OpenScreenTagList`, `OpenWindowTagList`, `NewObjectA`,
+`SetWindowPointerA`, `EasyRequestArgs`, `LockBitMapTagList` and
+`CreateNewProc` with explicit arrays. The official NDK 3.2 inline stdarg
+wrappers cast `&firstTag` to a tag array. With open4 GCC 16 at `-O3`, the
+following varargs values can be discarded: screen creation received only
+the first tag followed by unrelated stack contents. `NO_INLINE_STDARG` in
+the display/audio units prevents reintroducing these wrappers.
+
+`tools/ndk-tags-check.c` installs a fake Intuition LVO -612 vector that checks
+the real A1 argument, without needing a screen implementation. Compile at
+`-m68060 -msoft-float -mcrt=nix20 -O3`, then link separately with
+`-m68000 -msoft-float -mcrt=nix20`. The normal explicit-array version must
+print PASS. Building with `-DTEST_SDK_VARARGS` reproduces FAIL with this SDK
+and compiler. This verifies argument delivery, not physical screen creation.
+
+Screen failures now report the failing stage, OS screen error code and
+free/largest Chip RAM. A top-level exception handler unwinds owned contexts
+and returns 20 to Shell instead of calling abort for a startup exception.
