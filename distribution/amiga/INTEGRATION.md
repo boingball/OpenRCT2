@@ -422,3 +422,43 @@ workers. It also shows absolute object.json paths opening with nonzero file
 sizes but reads failing at position zero with EOF set and no stream error.
 This supports isolating file I/O from workers; it is not a missing-file
 report and does not yet identify the runtime's precise stdio/task defect.
+
+## 0.23: A1200 loading and LAN browser corrections
+
+The first physical A1200 test of 0.22.1 reached the menu after about eight
+minutes, but Crazy Castle failed with bad_alloc and file-open errors. Only
+about 9 MB system memory remained. This was a failed park load, not a
+successful real-hardware gameplay test.
+
+* Small-memory Amiga JSON objects share immutable base G1 pixels. Object
+  headers, offsets and zoom links remain private; temporary, CSG, PNG and
+  legacy DAT pixels retain their original ownership. The graphics bank is
+  released after objects at context shutdown.
+* Paint-session pool segments contain two sessions instead of 32 in the
+  small-memory profile, avoiding a large contiguous allocation at first paint.
+* Failed object batches unregister their newly decoded objects and undo
+  activation. Legacy image-source caches clear even if decoding throws.
+* File streams use bounded 1-16 KiB buffers; open failures log errno and
+  available memory. Their underlying cause is not yet isolated on hardware.
+* Trace append operations are serialized with an Exec signal semaphore,
+  preventing concurrent writers from overwriting/interleaving lines.
+* The OpenRCT2-A1200 launcher selects AGA and Paula and sets
+  OPENRCT2_SKIP_TITLE=1. Its static title menu intentionally has no demo park;
+  choose a scenario directly. Experimental-AGA retains the animated title.
+* The Amiga server browser polls LAN discovery on the UI task, with a two
+  second deadline and a 16-packet-per-update work bound. It makes no public
+  master-server HTTP request and starts no nested async socket workers.
+  Add Server still accepts an IPv4 address for a compatible-profile peer.
+
+Validation: actual ImageTable JSON loading with a generated G1 bank checks
+shared pointers, independent offsets, both zoom levels, mixed ownership and
+16 destruction/reload rounds. Actual ObjectManager testing injects bad_alloc
+during activation, verifies rollback, then retries and shuts down. Both pass
+in volamos on 68060 with FPU disabled, dirty heap and sanitizer enabled.
+Native allocator, software-float, RLE zoom and AGA C2P regression checks pass.
+Host ASan/UBSan LAN discovery tests check task ownership, polling bounds,
+malformed packets, timeout/wraparound, restart and failure cleanup.
+
+Full GUI gameplay, 128 MB fit, file-open error resolution and real LAN play
+still require physical hardware validation. No speedup or RAM saving in MB
+is claimed from synthetic tests.

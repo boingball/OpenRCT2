@@ -219,11 +219,27 @@ void amiga_dir_scan(const char* path, amiga_dir_cb cb, void* ctx)
  * pay thousands of Open() calls during the park load, nor leave a growing log behind. */
 static int s_traceEnabled = -1;
 static char s_tracePath[256];
+static struct SignalSemaphore s_traceMutex;
+static int s_traceMutexReady = 0;
+
+static void trace_lock(void)
+{
+    Forbid();
+    if (!s_traceMutexReady)
+    {
+        InitSemaphore(&s_traceMutex);
+        s_traceMutexReady = 1;
+    }
+    Permit();
+    ObtainSemaphore(&s_traceMutex);
+}
 
 int amiga_trace_enabled(void)
 {
+    trace_lock();
     if (s_traceEnabled < 0)
         s_traceEnabled = (GetVar((STRPTR) "OPENRCT2_TRACE", (STRPTR)s_tracePath, sizeof(s_tracePath), 0) > 0) ? 1 : 0;
+    ReleaseSemaphore(&s_traceMutex);
     return s_traceEnabled;
 }
 
@@ -236,12 +252,16 @@ void amiga_trace(const char* line)
     BPTR fh;
     if (!amiga_trace_enabled())
         return;
+    trace_lock();
     now = amiga_ticks_ms();
     if (t0 == 0)
         t0 = now;
     fh = Open((STRPTR)path, MODE_READWRITE);
     if (fh == 0)
+    {
+        ReleaseSemaphore(&s_traceMutex);
         return;
+    }
     Seek(fh, 0, OFFSET_END);
     /* elapsed milliseconds since the first trace line, so the load can be profiled from the file */
     {
@@ -269,6 +289,7 @@ void amiga_trace(const char* line)
     Write(fh, (APTR)line, strlen(line));
     Write(fh, (APTR) "\n", 1);
     Close(fh);
+    ReleaseSemaphore(&s_traceMutex);
 }
 
 #endif

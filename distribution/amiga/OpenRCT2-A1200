@@ -1,0 +1,9 @@
+; 0.23 A1200: AGA, Paula and a static title menu to preserve loading memory.
+.key RCT2DIR
+.def RCT2DIR "RCT2:"
+Failat 21
+SetEnv OPENRCT2_AUDIO PAULA
+SetEnv OPENRCT2_SKIP_TITLE 1
+Execute OpenRCT2-Experimental-AGA "<RCT2DIR>"
+UnsetEnv OPENRCT2_SKIP_TITLE
+UnsetEnv OPENRCT2_AUDIO

@@ -17,6 +17,8 @@
     #include <sys/stat.h>
 #endif
 #include <cinttypes>
+#include <cerrno>
+#include "../platform/AmigaTrace.h"
 #include <string_view>
 
 #ifdef __amigaos__
@@ -122,6 +124,13 @@ namespace OpenRCT2
 #endif
         if (_file == nullptr)
         {
+#ifdef __amigaos__
+            const int savedErrno = errno;
+            char diagnostic[512];
+            std::snprintf(diagnostic, sizeof(diagnostic), "file: open failed errno %d, free %u KB: %s",
+                savedErrno, amiga_avail_kb(), path);
+            AMIGA_TRACE(diagnostic);
+#endif
             throw IOException(String::stdFormat("Unable to open '%s'", path));
         }
 
@@ -140,7 +149,9 @@ namespace OpenRCT2
 
 #ifdef __amigaos__
         // libnix's default stdio buffer is 1 KB, i.e. one DOS Read() per KB; 64 KB cuts the call count 64-fold.
-        setvbuf(_file, nullptr, _IOFBF, 64 * 1024);
+        // Small JSONs and long-lived audio streams need no 64 KiB buffer each.
+        const auto bufferSize = static_cast<size_t>(std::min<uint64_t>(std::max<uint64_t>(_fileSize, 1024), 16 * 1024));
+        setvbuf(_file, nullptr, _IOFBF, bufferSize);
         _position = (fileMode == FileMode::append) ? _fileSize : 0;
 #endif
         _ownsFilePtr = true;
