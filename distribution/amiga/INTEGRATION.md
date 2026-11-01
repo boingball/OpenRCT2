@@ -462,3 +462,28 @@ malformed packets, timeout/wraparound, restart and failure cleanup.
 Full GUI gameplay, 128 MB fit, file-open error resolution and real LAN play
 still require physical hardware validation. No speedup or RAM saving in MB
 is claimed from synthetic tests.
+
+## 0.24: no-scripting multiplayer join
+
+The server sends scriptsData even when scripting is compiled out, with a
+four-byte zero count. The old no-scripting client rejected every such
+packet with "The client requires plugin support", preventing map loading.
+The client now validates/consumes the count and accepts an empty script
+list. Nonzero counts still disconnect a client without plugin support;
+short/inconsistent headers and trailing data after zero are rejected.
+Disconnect uses Connection::disconnect() so the active packet remains alive
+until normal tick cleanup; the existing NetworkBase Close deferral is retained.
+
+Disconnect closes the progress overlay without its cancel callback so an
+error is visible. Amiga mouse input does not activate background windows
+while a progress/network-status dialog is present. Transfer stage traces
+record script count, map byte counts, handler exceptions, map import outcome
+and disconnect reasons, without logging keys or map contents.
+
+Host sanitizer tests exercise production Packet/header parsing for empty
+and nonempty script lists, truncated counts, trailing bytes and inconsistent
+length/cursor values. A native target openrct2-network-scripts-test provides
+the same check. Full host/client join remains a tester gate: the previous
+logs ended cleanly before any network map import and did not capture the
+reported crash. PNG import bad_alloc warnings on that client are a separate
+unresolved issue; this change does not claim to fix them.
