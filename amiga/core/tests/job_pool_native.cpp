@@ -7,6 +7,13 @@
 int main()
 {
     const auto mainThread=std::this_thread::get_id();
+    {
+        JobPool loadingPool(0); unsigned work=0, completed=0;
+        for(unsigned i=0;i<128;++i)
+            loadingPool.AddTask([&]{ assert(std::this_thread::get_id()==mainThread);++work; },
+                [&]{ assert(std::this_thread::get_id()==mainThread);++completed; });
+        loadingPool.Join();assert(work==128 && completed==128 && !loadingPool.IsBusy());
+    }
     for (int round=0;round<8;++round)
     {
         JobPool pool(64);
@@ -21,5 +28,5 @@ int main()
         for (unsigned i=0;i<32;++i) pool.AddTask([&]{++work;},[&]{++completed;});
         pool.Join();assert(work==160 && completed==160 && !pool.IsBusy());
     }
-    puts("JobPool: actual worker execution, two-worker limit, main-task completion, reuse and repeated shutdown PASS");
+    puts("JobPool: explicit inline loading and actual worker execution, two-worker limit, main-task completion, reuse and repeated shutdown PASS");
 }

@@ -662,7 +662,14 @@ namespace OpenRCT2
             };
 
             // Dispatch loading the objects
+#ifdef __amigaos__
+            // Object factories use DOS file I/O and shared image/load state.
+            // Keep them on the owning task even in the rendering-worker build.
+            AMIGA_TRACE("objects: loading on main task (rendering workers remain available)");
+            JobPool jobs{ 0 };
+#else
             JobPool jobs{};
+#endif
             for (auto* object : objectsToLoad)
             {
                 jobs.AddTask([object, &loadSingleObject]() { loadSingleObject(object); }, completionFn);

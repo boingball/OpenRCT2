@@ -396,3 +396,29 @@ WinUAE/hardware tests; multiplayer is not yet validated end to end.
 On Amiga the client opens TCP after generating/loading its local key, so a
 slow first-time RSA generation does not consume the server handshake timeout.
 Key generation failure stops the join; it is not treated as a valid identity.
+
+### 0.22.1: keep file loading on its owning task
+
+A WinUAE tester reports most objects missing/corrupt when loading Crazy Castle
+with 0.22. That build enabled workers in ObjectManager and FileIndex as well
+as viewport rendering. The screenshot alone does not establish the exact
+failure (DOS task context, shared object-loader state or another issue).
+
+On Amiga, ObjectManager loading and FileIndex building now explicitly request
+JobPool(0), retaining the established main-task file I/O path. Experimental
+viewport workers remain enabled. The threaded Amiga file-index format version
+is bumped to force rebuilding potentially incomplete caches from 0.22. This
+changes caches only, not park saves, network protocol or capacity limits.
+The same user-experimental22 profile is retained. Trace records both the
+main-task loader/index path and separate viewport worker creation.
+
+The actual JobPool regression checks explicit zero-worker dispatch/completion
+on the caller, then the two-worker path. WinUAE park loading/rendering still
+requires tester confirmation; this is a targeted isolation fix, not a claim
+that threaded Amiga file I/O has been repaired.
+
+The follow-up WinUAE console confirms OpenRCT2ThreadTest PASS for actual
+workers. It also shows absolute object.json paths opening with nonzero file
+sizes but reads failing at position zero with EOF set and no stream error.
+This supports isolating file I/O from workers; it is not a missing-file
+report and does not yet identify the runtime's precise stdio/task defect.
