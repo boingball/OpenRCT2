@@ -1011,6 +1011,31 @@ namespace OpenRCT2::Ui
         }
         // Some windows need to be transparent even if the colours aren't.
         // There doesn't seem to be any side-effects for all windows being transparent
+        if (Config::Get().general.solidWindows)
+        {
+            // On a slow CPU a transparent window costs a viewport paint underneath it on every scrolled frame, and
+            // the shift code then redraws the whole window as well. Bars: made opaque outright (their translucent
+            // panel colours become plain). Other windows: opaque unless they are translucent or draw no background.
+            const bool isBar = classification == WindowClass::topToolbar || classification == WindowClass::newsTicker
+                || classification == WindowClass::parkInfoPanel || classification == WindowClass::dateInfoPanel;
+            if (isBar)
+            {
+                for (int32_t i = 0; i < 6; i++)
+                {
+                    window->colours[i].flags.unset(ColourFlag::translucent);
+                }
+                return;
+            }
+            bool translucent = false;
+            for (int32_t i = 0; i < 6; i++)
+            {
+                translucent |= window->colours[i].flags.has(ColourFlag::translucent);
+            }
+            if (!translucent && !window->flags.has(WindowFlag::noBackground))
+            {
+                return;
+            }
+        }
         window->flags |= WindowFlag::transparent;
     }
 } // namespace OpenRCT2::Ui

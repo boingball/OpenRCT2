@@ -15,6 +15,21 @@
 
 using namespace OpenRCT2::Drawing;
 
+#if defined(__amigaos__) || defined(OPENRCT2_RLE_FAST)
+    #ifdef __amigaos__
+extern "C" int amiga_env_flag(const char* name);
+static bool amiga_rle_fast_off()
+{
+    return amiga_env_flag("OPENRCT2_NO_RLE_FAST") != 0;
+}
+    #else
+static bool amiga_rle_fast_off()
+{
+    return false;
+}
+    #endif
+#endif
+
 template<DrawBlendOp TBlendOp>
 static void FASTCALL DrawRLESpriteMagnify(RenderTarget& rt, const DrawSpriteArgs& args)
 {
@@ -32,8 +47,8 @@ static void FASTCALL DrawRLESpriteMagnify(RenderTarget& rt, const DrawSpriteArgs
     {
         PaletteIndex* nextDst = dst + dstLineWidth;
         const int32_t rowNum = zoom.ApplyTo(srcY + y);
-        uint16_t lineOffset;
-        std::memcpy(&lineOffset, &imgData[rowNum * sizeof(uint16_t)], sizeof(uint16_t));
+        // RLE row offsets remain little-endian in sprite data on every host.
+        const uint16_t lineOffset = imgData[rowNum * 2] | (imgData[rowNum * 2 + 1] << 8);
         const uint8_t* data8 = imgData + lineOffset;
 
         bool lastDataForLine = false;
@@ -140,6 +155,51 @@ static void FASTCALL DrawRLESpriteMinify(RenderTarget& rt, const DrawSpriteArgs&
                     std::memcpy(dst, src, numPixels);
                 }
             }
+#if defined(__amigaos__) || defined(OPENRCT2_RLE_FAST) // OPENRCT2_RLE_FAST: spike/rle/harness.cpp checks it natively
+            else if constexpr (TBlendOp == (kBlendTransparent | kBlendSrc) && TZoom == 0)
+            {
+                // OPENRCT2_NO_RLE_FAST=1 falls back to the generic per-pixel loop (bisecting a freeze on Emu68).
+                static const bool fastOff = amiga_rle_fast_off();
+                if (fastOff)
+                {
+                    auto& paletteMap = args.PalMap;
+                    while (numPixels > 0)
+                    {
+                        BlitPixel<TBlendOp>(reinterpret_cast<PaletteIndex*>(src), dst, paletteMap);
+                        numPixels -= zoom;
+                        src += zoom;
+                        dst++;
+                    }
+                    continue;
+                }
+                // Remapped sprites (anything with a primary colour: guests, vehicles, most scenery) are half of all
+                // sprites drawn. An RLE run holds no transparent source pixels (the plain path memcpys it), so only
+                // the remapped value needs the transparency test; four pixels per iteration keeps the loop overhead
+                // down on the 68k.
+                const PaletteIndex* map = args.PalMap.data();
+                for (; numPixels >= 4; numPixels -= 4, src += 4, dst += 4)
+                {
+                    const PaletteIndex p0 = map[src[0]];
+                    const PaletteIndex p1 = map[src[1]];
+                    const PaletteIndex p2 = map[src[2]];
+                    const PaletteIndex p3 = map[src[3]];
+                    if (p0 != PaletteIndex::transparent)
+                        dst[0] = p0;
+                    if (p1 != PaletteIndex::transparent)
+                        dst[1] = p1;
+                    if (p2 != PaletteIndex::transparent)
+                        dst[2] = p2;
+                    if (p3 != PaletteIndex::transparent)
+                        dst[3] = p3;
+                }
+                for (; numPixels > 0; numPixels--, src++, dst++)
+                {
+                    const PaletteIndex p = map[src[0]];
+                    if (p != PaletteIndex::transparent)
+                        dst[0] = p;
+                }
+            }
+#endif
             else
             {
                 auto& paletteMap = args.PalMap;

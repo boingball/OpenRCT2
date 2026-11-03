@@ -10,12 +10,13 @@
 #pragma once
 
 #include "rct2/Limits.h"
+#include "MemoryProfile.h"
 
 #include <limits>
 
 namespace OpenRCT2::Limits
 {
-    constexpr uint16_t kMaxRidesInPark = 1000;
+    constexpr uint16_t kMaxRidesInPark = MemoryProfile::kRides;
     constexpr uint16_t kMaxStationsPerRide = 255;
     constexpr uint8_t kCustomerHistorySize = RCT12::Limits::kCustomerHistorySize;
     constexpr uint8_t kMaxGolfHoles = std::numeric_limits<uint8_t>::max();

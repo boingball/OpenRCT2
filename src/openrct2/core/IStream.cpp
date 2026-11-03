@@ -10,7 +10,6 @@
 #include "IStream.hpp"
 
 #include "StreamBuffer.hpp"
-#include "String.hpp"
 
 namespace OpenRCT2
 {
@@ -40,7 +39,7 @@ namespace OpenRCT2
     void IStream::WriteString(std::string_view str)
     {
         // if the string contains any null characters, then stop the write at the first one
-        str = String::toStringView(str.data(), str.size());
+        str = str.substr(0, str.find('\0'));
         Write(str.data(), str.size());
         WriteValue<uint8_t>(0);
     }

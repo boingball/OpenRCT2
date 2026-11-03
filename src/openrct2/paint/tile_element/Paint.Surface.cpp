@@ -963,6 +963,43 @@ void PaintSurface(PaintSession& session, uint8_t direction, uint16_t height, con
 
     TileDescriptor tileDescriptors[4];
 
+#ifdef __amigaos__
+    // Amiga: the column walk visits tiles well below the render target because a tall element on them could reach up
+    // into it; their ground cannot. PaintTileElementBase already skips a whole tile whose tallest element sits more
+    // than 32 px below the target (clearance + 32, water included), i.e. it relies on nothing being painted higher
+    // than that above an element. Apply the same rule to the surface element alone: when even the ground's clearance
+    // (or water) + 32 is below the target, nothing PaintSurface adds can show. Skip that work and leave the session as
+    // the painter would have: no last paint struct, the water height noted, the support heights set by the tail
+    // below. Sprite-level culling deliberately ignores the vertical extent (see ViewportPaint), so this is the only
+    // place the ground of such tiles is dropped. OPENRCT2_NO_SURFACE_CULL switches it off for A/B checks.
+    static const bool surfaceCullOff = amiga_env_flag("OPENRCT2_NO_SURFACE_CULL") != 0;
+    bool surfaceBelowTarget = false;
+    {
+        const int32_t screenMinY = Translate3DTo2DWithZ(rotation, { session.SpritePosition, 0 }).y;
+        const int32_t top = screenMinY - std::max<int32_t>(tileElement.getClearanceZ(), tileElement.getWaterHeight()) - 32;
+        surfaceBelowTarget = top >= session.rt.WorldY() + session.rt.WorldHeight();
+        gPaintSurfaceStat[0]++;
+        if (surfaceBelowTarget)
+            gPaintSurfaceStat[1]++;
+    }
+    const size_t entriesBefore = session.paintEntries.size();
+    if (surfaceBelowTarget && !surfaceCullOff)
+    {
+        session.LastPS = nullptr;
+        session.LastAttachedPS = nullptr;
+        const uint16_t waterHeight = tileElement.getWaterHeight();
+        const bool waterGetsClipped = session.ViewFlags.has(ViewportFlag::clipView)
+            && (waterHeight > gClipHeight * kCoordsZStep);
+        if (waterHeight > 0 && !gTrackDesignSaveMode && !waterGetsClipped)
+        {
+            session.WaterHeight = waterHeight;
+        }
+    }
+    else
+    {
+#endif
+    {
+    PAINT_PROF_SCOPE_PHASE(10, 1);
     for (std::size_t i = 0; i < std::size(kNeighbouringTileCoordOffsets); i++)
     {
         const CoordsXY& offset = kNeighbouringTileCoordOffsets[i][rotation];
@@ -994,6 +1031,7 @@ void PaintSurface(PaintSession& session, uint8_t direction, uint16_t height, con
         descriptor.corner_heights.right = baseHeight + ch.right;
         descriptor.corner_heights.bottom = baseHeight + ch.bottom;
         descriptor.corner_heights.left = baseHeight + ch.left;
+    }
     }
 
     if (PaintShouldShowHeightMarkers(session, ViewportFlag::landHeights))
@@ -1200,6 +1238,8 @@ void PaintSurface(PaintSession& session, uint8_t direction, uint16_t height, con
         }
     }
 
+    {
+    PAINT_PROF_SCOPE_PHASE(11, 2);
     if (zoomLevel <= ZoomLevel{ 0 } && has_surface && !session.ViewFlags.has(ViewportFlag::undergroundInside)
         && !session.ViewFlags.has(ViewportFlag::hideBase) && Config::Get().general.landscapeSmoothing)
     {
@@ -1231,6 +1271,7 @@ void PaintSurface(PaintSession& session, uint8_t direction, uint16_t height, con
             session, EDGE_BOTTOMLEFT, height, edgeObject, selfDescriptor, tileDescriptors[0], false, edgeColour1);
         ViewportSurfaceDrawTileSideBottom(
             session, EDGE_BOTTOMRIGHT, height, edgeObject, selfDescriptor, tileDescriptors[1], false, edgeColour1);
+    }
     }
 
     const uint16_t waterHeight = tileElement.getWaterHeight();
@@ -1340,6 +1381,10 @@ void PaintSurface(PaintSession& session, uint8_t direction, uint16_t height, con
         }
     }
 
+#ifdef __amigaos__
+    }
+    gPaintSurfaceStat[3] += static_cast<uint32_t>(session.paintEntries.size() - entriesBefore);
+#endif
     session.InteractionType = ViewportInteractionItem::terrain;
 
     switch (surfaceShape)

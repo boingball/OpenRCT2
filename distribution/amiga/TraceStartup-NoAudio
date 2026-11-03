@@ -1,0 +1,14 @@
+; Start from the OpenRCT2 drawer. Appends logs; never deletes an earlier trace.
+Failat 21
+If NOT EXISTS "OpenRCT2"
+  Echo "Start this script from inside the OpenRCT2 drawer."
+  Quit 10
+EndIf
+Echo "=== OpenRCT2 0.15 startup: audio disabled for this diagnostic ===" >>"Work:OpenRCT2-startup-noaudio.log"
+Avail >>"Work:OpenRCT2-startup-noaudio.log"
+SetEnv OPENRCT2_TRACE "Work:OpenRCT2-startup-noaudio.log"
+SetEnv OPENRCT2_NO_AUDIO 1
+Execute OpenRCT2 >>"Work:OpenRCT2-console-noaudio.log"
+UnsetEnv OPENRCT2_TRACE
+UnsetEnv OPENRCT2_NO_AUDIO
+Echo "Trace saved in Work:OpenRCT2-startup-noaudio.log. If the Amiga crashed, attach that file after rebooting."

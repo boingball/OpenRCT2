@@ -12,7 +12,8 @@
         #define WIN32_LEAN_AND_MEAN
     #endif
     #include <windows.h>
-#elif defined(__unix__) || defined(__HAIKU__) || (defined(__APPLE__) && defined(__MACH__)) || defined(__ANDROID__)
+#elif defined(__unix__) || defined(__amigaos__) || defined(__HAIKU__) || (defined(__APPLE__) && defined(__MACH__))             \
+    || defined(__ANDROID__)
     #include <dirent.h>
     #include <sys/stat.h>
 #endif
@@ -23,6 +24,15 @@
 #include "Path.hpp"
 #include "String.hpp"
 
+#ifdef __amigaos__
+extern "C" {
+typedef void (*amiga_dir_cb)(void* ctx, const char* name, int isDir, unsigned long size, unsigned long mtime);
+void amiga_dir_scan(const char* path, amiga_dir_cb cb, void* ctx);
+}
+#endif
+
+#include <algorithm>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <set>
@@ -309,7 +319,7 @@ public:
 };
 #endif // __ANDROID__
 
-#if defined(__unix__) || defined(__HAIKU__) || (defined(__APPLE__) && defined(__MACH__))
+#if defined(__unix__) || defined(__amigaos__) || defined(__HAIKU__) || (defined(__APPLE__) && defined(__MACH__))
 
 class FileScannerUnix final : public FileScannerBase
 {
@@ -321,6 +331,27 @@ public:
 
     void getDirectoryChildren(std::vector<DirectoryChild>& children, const std::string& path) override
     {
+    #ifdef __amigaos__
+        // ExNext() gives name, type, size and date in one DOS call per entry; scandir()+stat() needed about six.
+        amiga_dir_scan(
+            path.c_str(),
+            [](void* ctx, const char* name, int isDir, unsigned long size, unsigned long mtime) {
+                auto& out = *static_cast<std::vector<DirectoryChild>*>(ctx);
+                DirectoryChild child;
+                child.name = name;
+                child.type = isDir ? DirectoryChildType::directory : DirectoryChildType::file;
+                child.size = size;
+                child.lastModified = mtime;
+                out.push_back(std::move(child));
+            },
+            &children);
+        // scandir() returned the entries sorted; keep that order so index and list contents do not depend on the
+        // filesystem's hash order.
+        std::sort(children.begin(), children.end(), [](const DirectoryChild& a, const DirectoryChild& b) {
+            return std::strcmp(a.name.c_str(), b.name.c_str()) < 0;
+        });
+        return;
+    #endif
         struct dirent** namelist;
         int32_t count = scandir(path.c_str(), &namelist, filterFunc, alphasort);
         if (count > 0)
@@ -356,6 +387,10 @@ private:
         struct stat stbuf;
         stat(node->d_name, &stbuf);
         if (S_ISDIR(stbuf.st_mode))
+    #elif defined(__amigaos__)
+        // libnix leaves d_type uninitialised; only stat() can tell
+        struct stat stbuf{};
+        if (stat(Path::Combine(directory, node->d_name).c_str(), &stbuf) == 0 && S_ISDIR(stbuf.st_mode))
     #else
         if (node->d_type == DT_DIR)
     #endif
@@ -399,7 +434,7 @@ private:
     }
 };
 
-#endif // defined(__unix__) || defined(__HAIKU__) || (defined(__APPLE__) && defined(__MACH__))
+#endif // defined(__unix__) || defined(__amigaos__) || defined(__HAIKU__) || (defined(__APPLE__) && defined(__MACH__))
 
 std::unique_ptr<IFileScanner> Path::scanDirectory(const std::string& pattern, bool recurse)
 {
@@ -411,7 +446,7 @@ std::unique_ptr<IFileScanner> Path::scanDirectory(const std::string& pattern, bo
 #endif
 #ifdef _WIN32
     return std::make_unique<FileScannerWindows>(pattern, recurse);
-#elif defined(__unix__) || defined(__HAIKU__) || (defined(__APPLE__) && defined(__MACH__))
+#elif defined(__unix__) || defined(__amigaos__) || defined(__HAIKU__) || (defined(__APPLE__) && defined(__MACH__))
     return std::make_unique<FileScannerUnix>(pattern, recurse);
 #endif
 }

@@ -21,10 +21,6 @@
 
 namespace OpenRCT2
 {
-    ObjectEntryIndex SurfaceElement::getSurfaceObjectIndex() const
-    {
-        return surfaceStyle;
-    }
 
     TerrainSurfaceObject* SurfaceElement::getSurfaceObject() const
     {
@@ -32,35 +28,10 @@ namespace OpenRCT2
         return objManager.GetLoadedObject<TerrainSurfaceObject>(getSurfaceObjectIndex());
     }
 
-    ObjectEntryIndex SurfaceElement::getEdgeObjectIndex() const
-    {
-        return edgeObjectIndex;
-    }
-
     TerrainEdgeObject* SurfaceElement::getEdgeObject() const
     {
         auto& objManager = GetContext()->GetObjectManager();
         return objManager.GetLoadedObject<TerrainEdgeObject>(getEdgeObjectIndex());
-    }
-
-    void SurfaceElement::setSurfaceObjectIndex(ObjectEntryIndex newStyle)
-    {
-        surfaceStyle = static_cast<ObjectEntryIndex>(newStyle);
-    }
-
-    void SurfaceElement::setEdgeObjectIndex(ObjectEntryIndex newIndex)
-    {
-        edgeObjectIndex = static_cast<ObjectEntryIndex>(newIndex);
-    }
-
-    int32_t SurfaceElement::getWaterHeight() const
-    {
-        return waterHeight * kWaterHeightStep;
-    }
-
-    void SurfaceElement::setWaterHeight(int32_t newWaterHeight)
-    {
-        waterHeight = newWaterHeight / kWaterHeightStep;
     }
 
     bool SurfaceElement::canGrassGrow() const
@@ -74,16 +45,6 @@ namespace OpenRCT2
             }
         }
         return false;
-    }
-
-    uint8_t SurfaceElement::getGrassLength() const
-    {
-        return grassLength;
-    }
-
-    void SurfaceElement::setGrassLength(uint8_t newLength)
-    {
-        grassLength = newLength;
     }
 
     void SurfaceElement::setGrassLengthAndInvalidate(uint8_t length, const CoordsXY& coords)
@@ -191,76 +152,9 @@ namespace OpenRCT2
         }
     }
 
-    OwnershipFlags SurfaceElement::getOwnership() const
-    {
-        OwnershipFlags ret;
-        ret.holder = (ownership & kTileElementSurfaceOwnershipMask) >> 4;
-        return ret;
-    }
-
-    void SurfaceElement::setOwnership(OwnershipFlags newOwnership)
-    {
-        ownership &= ~kTileElementSurfaceOwnershipMask;
-        ownership |= (((newOwnership.holder) << 4) & kTileElementSurfaceOwnershipMask);
-    }
-
     bool SurfaceElement::hasOwnership(OwnershipFlag flag) const
     {
         return getOwnership().has(flag);
     }
 
-    uint8_t SurfaceElement::getParkFences() const
-    {
-        return (ownership & kTileElementSurfaceParkFenceMask);
-    }
-
-    void SurfaceElement::setParkFences(uint8_t newParkFences)
-    {
-        ownership &= ~kTileElementSurfaceParkFenceMask;
-        ownership |= (newParkFences & kTileElementSurfaceParkFenceMask);
-    }
-
-    uint8_t SurfaceElement::getSlope() const
-    {
-        return slope;
-    }
-
-    void SurfaceElement::setSlope(uint8_t newSlope)
-    {
-        slope = newSlope;
-    }
-
-    bool SurfaceElement::hasTrackThatNeedsWater() const
-    {
-        return (type & SURFACE_ELEMENT_HAS_TRACK_THAT_NEEDS_WATER) != 0;
-    }
-
-    void SurfaceElement::setHasTrackThatNeedsWater(bool on)
-    {
-        type &= ~SURFACE_ELEMENT_HAS_TRACK_THAT_NEEDS_WATER;
-        if (on)
-            type |= SURFACE_ELEMENT_HAS_TRACK_THAT_NEEDS_WATER;
-    }
-
-    Drawing::Colour SurfaceElement::getPrimarySurfaceColour() const
-    {
-        return surfaceColour1;
-    }
-
-    void SurfaceElement::setPrimarySurfaceColour(Drawing::Colour newColour)
-    {
-        newColour = (newColour == Drawing::Colour::invisible) ? Drawing::Colour::black : clampColour(newColour);
-        surfaceColour1 = newColour;
-    }
-
-    Drawing::Colour SurfaceElement::getPrimaryEdgeColour() const
-    {
-        return edgeColour1;
-    }
-
-    void SurfaceElement::setPrimaryEdgeColour(Drawing::Colour newColour)
-    {
-        newColour = (newColour == Drawing::Colour::invisible) ? Drawing::Colour::black : clampColour(newColour);
-        edgeColour1 = newColour;
-    }
 } // namespace OpenRCT2

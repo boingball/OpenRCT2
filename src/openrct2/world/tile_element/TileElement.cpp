@@ -97,18 +97,6 @@ namespace OpenRCT2
         }
     }
 
-    void TileElement::clearAs(TileElementType newType)
-    {
-        type = 0;
-        setType(newType);
-        flags = 0;
-        baseHeight = kMinimumLandHeight;
-        clearanceHeight = kMinimumLandHeight;
-        owner = 0;
-        std::fill_n(pad05, sizeof(pad05), 0x00);
-        std::fill_n(pad08, sizeof(pad08), 0x00);
-    }
-
     bool tileElementIsUnderground(TileElement* tileElement)
     {
         do

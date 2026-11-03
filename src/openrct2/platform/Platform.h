@@ -34,8 +34,10 @@
     #define MAX_PATH 260
 #endif
 
+#ifndef __amigaos__
 static_assert(
     std::endian::native == std::endian::little, "OpenRCT2 is known to be broken on big endian. Proceed with caution!");
+#endif
 
 enum class SpecialFolder
 {
@@ -180,7 +182,7 @@ namespace OpenRCT2::Platform
     SteamPaths GetSteamPaths();
     bool triggerSteamDownload();
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__)) || defined(__FreeBSD__) || defined(__NetBSD__)              \
-    || defined(__HAIKU__)
+    || defined(__HAIKU__) || defined(__amigaos__)
     std::string GetEnvironmentPath(const char* name);
     std::string GetHomePath();
 #endif

@@ -8,8 +8,10 @@
  *****************************************************************************/
 
 #include "NetworkBase.h"
+#include "ScriptTransfer.h"
 
 #include "../Context.h"
+#include "../platform/AmigaTrace.h"
 #include "../Diagnostic.h"
 #include "../Game.h"
 #include "../GameState.h"
@@ -49,7 +51,11 @@
 
 constexpr uint8_t kStreamVersion = 1;
 
-const std::string kStreamID = std::string(kOpenRCT2Version) + "-" + std::to_string(kStreamVersion);
+const std::string kStreamID = std::string(kOpenRCT2Version) + "-" + std::to_string(kStreamVersion)
+#if defined(OPENRCT2_AMIGA_LAN_EXPERIMENT) && defined(OPENRCT2_SMALL_MEMORY)
+    + "-amiga-small-v1"
+#endif
+    ;
 
 static OpenRCT2::Peep* _pickup_peep = nullptr;
 static int32_t _pickup_peep_old_x = kLocationNull;
@@ -269,7 +275,9 @@ namespace OpenRCT2::Network
 
         _serverConnection = std::make_unique<Connection>();
         _serverConnection->socket = CreateTcpSocket();
+#ifndef __amigaos__
         _serverConnection->socket->ConnectAsync(host, port);
+#endif
         _serverState.gamestateSnapshotsEnabled = false;
 
         status = Status::connecting;
@@ -290,7 +298,7 @@ namespace OpenRCT2::Network
         {
             Console::WriteLine("Generating key... This may take a while");
             Console::WriteLine("Need to collect enough entropy from the system");
-            _key.Generate();
+            if (!_key.Generate()) { Close(); return false; }
             Console::WriteLine("Key generated, saving private bits as %s", keyPath.c_str());
 
             const auto keysDirectory = GetKeysDirectory();
@@ -345,9 +353,18 @@ namespace OpenRCT2::Network
 
             // Don't store private key in memory when it's not in use.
             _key.Unload();
+#ifdef __amigaos__
+            if (!ok) { Close(); return false; }
+            _serverConnection->socket->ConnectAsync(host, port);
+#endif
             return ok;
         }
 
+#ifdef __amigaos__
+        // First-time RSA generation on 68k can outlast the server handshake timeout.
+        // Open the TCP connection only once the local identity is ready.
+        _serverConnection->socket->ConnectAsync(host, port);
+#endif
         return true;
     }
 
@@ -662,6 +679,11 @@ namespace OpenRCT2::Network
             {
                 if (!ProcessConnection(*_serverConnection))
                 {
+                    // Clear the transfer overlay without invoking its cancel callback,
+                    // otherwise it can cover the disconnect reason indefinitely.
+                    GetContext().CloseProgress();
+                    AMIGA_TRACE(_serverConnection->getLastDisconnectReason()
+                        ? _serverConnection->getLastDisconnectReason() : "network: client disconnected without reason");
                     // Do not show disconnect message window when password window closed/canceled
                     if (_serverConnection->authStatus == Auth::requirePassword)
                     {
@@ -1481,6 +1503,7 @@ namespace OpenRCT2::Network
         }
 
         auto mapContent = SaveForNetwork(objects);
+        AMIGA_TRACE((std::string("network: server serialised map bytes ") + std::to_string(mapContent.size())).c_str());
         if (mapContent.empty())
         {
             if (connection != nullptr)
@@ -1867,6 +1890,7 @@ namespace OpenRCT2::Network
                 }
                 catch (const std::exception& ex)
                 {
+                    AMIGA_TRACE((std::string("network: packet handler exception: ") + ex.what()).c_str());
                     LOG_VERBOSE("Exception during packet processing: %s", ex.what());
                 }
             }
@@ -2535,11 +2559,19 @@ namespace OpenRCT2::Network
 
     void NetworkBase::Client_Handle_SCRIPTS_DATA(Connection& connection, Packet& packet)
     {
+        uint32_t count{};
+        if (!ReadScriptsHeader(packet, count))
+        {
+            AMIGA_TRACE("network: invalid scripts header; disconnect deferred");
+            connection.setLastDisconnectReason(STR_MULTIPLAYER_RECEIVED_INVALID_DATA);
+            connection.disconnect();
+            return;
+        }
+        AMIGA_TRACE((std::string("network: received script count ") + std::to_string(count)).c_str());
+        if (count == 0)
+            return; // Keep receiving the object/map transfer already in progress.
     #ifdef ENABLE_SCRIPTING
         auto& scriptEngine = GetContext().GetScriptEngine();
-
-        uint32_t count{};
-        packet >> count;
 
         for (uint32_t i = 0; i < count; ++i)
         {
@@ -2555,7 +2587,7 @@ namespace OpenRCT2::Network
         }
     #else
         connection.setLastDisconnectReason("The client requires plugin support.");
-        Close();
+        connection.disconnect();
     #endif
     }
 
@@ -2828,6 +2860,7 @@ namespace OpenRCT2::Network
 
     void NetworkBase::Client_Handle_MAP([[maybe_unused]] Connection& connection, Packet& packet)
     {
+        AMIGA_TRACE((std::string("network: client received map bytes ") + std::to_string(packet.data.size())).c_str());
         // Allow queue processing of game actions again.
         GameActions::ResumeQueue();
 
@@ -2849,6 +2882,7 @@ namespace OpenRCT2::Network
 
             _serverState.state = ServerStatus::ok;
             _clientMapLoaded = true;
+            AMIGA_TRACE("network: client map loaded; join ready");
             gFirstTimeSaving = true;
 
             // Notify user he is now online and which shortcut key enables chat
@@ -2865,6 +2899,7 @@ namespace OpenRCT2::Network
         else
         {
             // Something went wrong, game is not loaded. Return to main screen.
+            AMIGA_TRACE("network: client map load FAILED");
             auto loadOrQuitAction = GameActions::LoadOrQuitAction(
                 GameActions::LoadOrQuitModes::openSavePrompt, PromptMode::saveBeforeQuit);
 

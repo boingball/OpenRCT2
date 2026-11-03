@@ -23,110 +23,15 @@
 
 namespace OpenRCT2
 {
-    TileElementType TileElementBase::getType() const
-    {
-        return static_cast<TileElementType>((this->type & kTileElementTypeMask) >> 2);
-    }
-
-    void TileElementBase::setType(TileElementType newType)
-    {
-        this->type &= ~kTileElementTypeMask;
-        this->type |= ((EnumValue(newType) << 2) & kTileElementTypeMask);
-    }
-
-    Direction TileElementBase::getDirection() const
-    {
-        return this->type & kTileElementDirectionMask;
-    }
-
-    void TileElementBase::setDirection(Direction direction)
-    {
-        this->type &= ~kTileElementDirectionMask;
-        this->type |= (direction & kTileElementDirectionMask);
-    }
 
     Direction TileElementBase::getDirectionWithOffset(uint8_t offset) const
     {
         return DirectionRotate(getDirection(), offset);
     }
 
-    bool TileElementBase::isLastForTile() const
-    {
-        return (this->flags & TILE_ELEMENT_FLAG_LAST_TILE) != 0;
-    }
-
-    void TileElementBase::setLastForTile(bool on)
-    {
-        if (on)
-            flags |= TILE_ELEMENT_FLAG_LAST_TILE;
-        else
-            flags &= ~TILE_ELEMENT_FLAG_LAST_TILE;
-    }
-
-    bool TileElementBase::isInvisible() const
-    {
-        return (this->flags & TILE_ELEMENT_FLAG_INVISIBLE) != 0;
-    }
-
-    void TileElementBase::setInvisible(bool on)
-    {
-        if (on)
-            flags |= TILE_ELEMENT_FLAG_INVISIBLE;
-        else
-            flags &= ~TILE_ELEMENT_FLAG_INVISIBLE;
-    }
-
-    bool TileElementBase::isGhost() const
-    {
-        return (this->flags & TILE_ELEMENT_FLAG_GHOST) != 0;
-    }
-
-    void TileElementBase::setGhost(bool isGhost)
-    {
-        if (isGhost)
-        {
-            this->flags |= TILE_ELEMENT_FLAG_GHOST;
-        }
-        else
-        {
-            this->flags &= ~TILE_ELEMENT_FLAG_GHOST;
-        }
-    }
-
     void TileElementBase::remove()
     {
         TileElementRemove(static_cast<TileElement*>(this));
-    }
-
-    uint8_t TileElementBase::getOccupiedQuadrants() const
-    {
-        return flags & kTileElementOccupiedQuadrantsMask;
-    }
-
-    void TileElementBase::setOccupiedQuadrants(uint8_t quadrants)
-    {
-        flags &= ~kTileElementOccupiedQuadrantsMask;
-        flags |= (quadrants & kTileElementOccupiedQuadrantsMask);
-    }
-
-    int32_t TileElementBase::getBaseZ() const
-    {
-        return baseHeight * kCoordsZStep;
-    }
-
-    void TileElementBase::setBaseZ(int32_t newZ)
-    {
-        baseHeight = (newZ / kCoordsZStep);
-    }
-
-    int32_t TileElementBase::getClearanceZ() const
-    {
-        return clearanceHeight * kCoordsZStep;
-    }
-
-    void TileElementBase::setClearanceZ(int32_t newZ)
-    {
-        clearanceHeight = (newZ / kCoordsZStep);
     }
 
     uint8_t TileElementBase::getOwner() const
@@ -140,30 +45,6 @@ namespace OpenRCT2
         owner |= (newOwner & kTileElementOwnerMask);
     }
 
-    const SurfaceElement* TileElementBase::asSurface() const
-    {
-        return as<SurfaceElement>();
-    }
-    SurfaceElement* TileElementBase::asSurface()
-    {
-        return as<SurfaceElement>();
-    }
-    const PathElement* TileElementBase::asPath() const
-    {
-        return as<PathElement>();
-    }
-    PathElement* TileElementBase::asPath()
-    {
-        return as<PathElement>();
-    }
-    const TrackElement* TileElementBase::asTrack() const
-    {
-        return as<TrackElement>();
-    }
-    TrackElement* TileElementBase::asTrack()
-    {
-        return as<TrackElement>();
-    }
     const SmallSceneryElement* TileElementBase::asSmallScenery() const
     {
         return as<SmallSceneryElement>();

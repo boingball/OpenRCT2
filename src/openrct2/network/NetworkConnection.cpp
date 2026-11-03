@@ -79,6 +79,8 @@ namespace OpenRCT2::Network
         magic = Convert::NetworkToHost(magic);
         if (magic == PacketHeader::kMagic)
         {
+            // TCP may deliver only the magic before the rest of the header.
+            if (_inboundBuffer.size() < sizeof(PacketHeader)) return ReadPacket::moreData;
             // New format.
             auto& header = inboundPacket.header;
             std::memcpy(&header, _inboundBuffer.data(), sizeof(header));
@@ -93,6 +95,7 @@ namespace OpenRCT2::Network
         }
         else
         {
+            if (_inboundBuffer.size() < sizeof(PacketLegacyHeader)) return ReadPacket::moreData;
             // Legacy format.
             PacketLegacyHeader header{};
             std::memcpy(&header, _inboundBuffer.data(), sizeof(header));

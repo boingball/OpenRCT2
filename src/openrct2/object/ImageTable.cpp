@@ -26,6 +26,8 @@
 
 #include <memory>
 #include <stdexcept>
+#include <mutex>
+#include <unordered_map>
 
 namespace OpenRCT2
 {
@@ -34,6 +36,7 @@ namespace OpenRCT2
     struct ImageTable::RequiredImage
     {
         G1Element g1{};
+        bool ownsPixels = true;
         std::unique_ptr<RequiredImage> next_zoom;
 
         bool HasData() const
@@ -53,31 +56,42 @@ namespace OpenRCT2
             g1.flags.unset(G1Flag::hasZoomSprite);
         }
 
-        RequiredImage(uint32_t idx, std::function<const G1Element*(uint32_t)> getter)
+        RequiredImage(uint32_t idx, std::function<const G1Element*(uint32_t)> getter, bool borrow = false)
         {
             auto orig = getter(idx);
             if (orig != nullptr)
             {
-                auto length = G1CalculateDataSize(orig);
                 g1 = *orig;
-                g1.offset = new uint8_t[length];
-                std::memcpy(g1.offset, orig->offset, length);
+                // Never borrow mutable temporary/image-list sprites, even if
+                // a custom object happens to address them using $G1 syntax.
+                borrow = borrow && idx < SPR_G1_END;
+                ownsPixels = !borrow;
+                if (ownsPixels)
+                {
+                    auto length = G1CalculateDataSize(orig);
+                    g1.offset = new uint8_t[length];
+                    std::memcpy(g1.offset, orig->offset, length);
+                }
+                // Keep ownership local until the recursive zoom allocation succeeds.
+                std::unique_ptr<uint8_t[]> pixels(ownsPixels ? g1.offset : nullptr);
                 if (g1.flags.has(G1Flag::hasZoomSprite) && g1.zoomedOffset != 0)
                 {
                     // Fetch image for next zoom level
-                    next_zoom = std::make_unique<RequiredImage>(static_cast<uint32_t>(idx - g1.zoomedOffset), getter);
+                    next_zoom = std::make_unique<RequiredImage>(static_cast<uint32_t>(idx - g1.zoomedOffset), getter, borrow);
                     if (!next_zoom->HasData())
                     {
                         next_zoom = nullptr;
                         g1.flags.unset(G1Flag::hasZoomSprite);
                     }
                 }
+                pixels.release();
             }
         }
 
         ~RequiredImage()
         {
-            delete[] g1.offset;
+            if (ownsPixels)
+                delete[] g1.offset;
         }
     };
 
@@ -130,7 +144,11 @@ namespace OpenRCT2
                 {
                     result.push_back(
                         std::make_unique<RequiredImage>(
-                            static_cast<uint32_t>(i), [](uint32_t idx) -> const G1Element* { return GfxGetG1Element(idx); }));
+                            static_cast<uint32_t>(i), [](uint32_t idx) -> const G1Element* { return GfxGetG1Element(idx); }
+#if defined(__amigaos__) && defined(OPENRCT2_SMALL_MEMORY)
+                            , true
+#endif
+                            ));
                 }
             }
         }
@@ -412,9 +430,13 @@ namespace OpenRCT2
     {
         if (_data == nullptr)
         {
-            for (auto& entry : _entries)
+            size_t borrowed = 0;
+            for (size_t i = 0; i < _entries.size(); ++i)
             {
-                delete[] entry.offset;
+                if (borrowed < _borrowedEntries.size() && _borrowedEntries[borrowed] == i)
+                    ++borrowed;
+                else
+                    delete[] _entries[i].offset;
             }
         }
     }
@@ -516,6 +538,12 @@ namespace OpenRCT2
     bool ImageTable::ReadJson(IReadObjectContext* context, json_t& root)
     {
         Guard::Assert(root.is_object(), "ImageTable::ReadJson expects parameter root to be object");
+        // A decode exception must not pin the last legacy DAT in thread-local
+        // storage while the user tries to load another park.
+        struct CacheReset
+        {
+            ~CacheReset() { _objDataCache.clear(); }
+        } cacheReset;
 
         bool usesFallbackSprites = false;
 
@@ -577,11 +605,32 @@ namespace OpenRCT2
             }
 
             // Now add all the images to the image table
+            auto append = [this](RequiredImage& image) {
+                if (image.ownsPixels)
+                {
+                    TakeImage(image.g1);
+                }
+                else
+                {
+                    _borrowedEntries.push_back(GetCount());
+                    try
+                    {
+                        _entries.push_back(image.g1);
+                    }
+                    catch (...)
+                    {
+                        _borrowedEntries.pop_back();
+                        throw;
+                    }
+                    image.g1.offset = nullptr;
+                }
+            };
             auto imagesStartIndex = GetCount();
-            for (const auto& img : allImages)
+            for (auto& img : allImages)
             {
-                const auto& g1 = img->g1;
-                AddImage(&g1);
+                // The RequiredImage already holds a private copy of the pixels: move it instead of copying again
+                // (tens of thousands of allocations and 37 MB of memcpy per RCT2 scenario on the old path).
+                append(*img);
             }
 
             // Add all the zoom images at the very end of the image table.
@@ -589,7 +638,7 @@ namespace OpenRCT2
             for (size_t j = 0; j < allImages.size(); j++)
             {
                 const auto tableIndex = imagesStartIndex + j;
-                const auto* img = allImages[j].get();
+                auto* img = allImages[j].get();
                 if (img->next_zoom != nullptr)
                 {
                     img = img->next_zoom.get();
@@ -600,21 +649,31 @@ namespace OpenRCT2
 
                     while (img != nullptr)
                     {
-                        auto g1b = img->g1;
                         if (img->next_zoom != nullptr)
                         {
-                            g1b.zoomedOffset = -1;
+                            img->g1.zoomedOffset = -1;
                         }
-                        AddImage(&g1b);
+                        append(*img);
                         img = img->next_zoom.get();
                     }
                 }
             }
         }
 
-        _objDataCache.clear();
-
         return usesFallbackSprites;
+    }
+
+    void ImageTable::TakeImage(G1Element& g1)
+    {
+        G1Element newg1 = g1;
+        if (G1CalculateDataSize(&g1) == 0)
+        {
+            delete[] g1.offset; // a zero-length buffer nobody will ever look at
+            g1.offset = nullptr;
+            newg1.offset = nullptr;
+        }
+        _entries.push_back(std::move(newg1));
+        g1.offset = nullptr;
     }
 
     void ImageTable::AddImage(const G1Element* g1)

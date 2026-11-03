@@ -11,6 +11,11 @@
 #include <openrct2-ui/interface/Window.h>
 #include <openrct2-ui/windows/Windows.h>
 #include <openrct2/Context.h>
+#ifdef __amigaos__
+#include <openrct2/OpenRCT2.h>
+#include <openrct2/drawing/Drawing.h>
+#include <openrct2/drawing/PaletteIndex.h>
+#endif
 #include <openrct2/config/Config.h>
 #include <openrct2/interface/Viewport.h>
 #include <openrct2/ui/WindowManager.h>
@@ -46,6 +51,13 @@ namespace OpenRCT2::Ui::Windows
 
         void onDraw(Drawing::RenderTarget& rt) override
         {
+#ifdef __amigaos__
+            // A failed title sequence leaves an empty map whose paint columns
+            // do not cover every pixel. Restore the dirty background region
+            // before repainting windows so menus and tooltips leave no trails.
+            if (gLegacyScene == LegacyScene::titleSequence)
+                GfxClear(rt, Drawing::PaletteIndex::pi10);
+#endif
             ViewportRender(rt, viewport);
         }
 

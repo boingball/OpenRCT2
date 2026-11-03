@@ -9,6 +9,8 @@
 
 #include "Config.h"
 
+#include "../platform/AmigaTrace.h"
+
 #include "../Context.h"
 #include "../Date.h"
 #include "../Diagnostic.h"
@@ -243,6 +245,12 @@ namespace OpenRCT2::Config
 #ifdef _DEBUG
             // Always have multi-threading disabled in debug builds, this makes things slower.
             model->multiThreading = false;
+#elif defined(__amigaos__)
+            // The 68k machines this runs on have one core, and JobPool creates no threads here at all: it runs every
+            // task on the caller. So the only thing this switch did was make the drawing code take the locks in
+            // DrawingLock for a concurrency that does not exist. Measured on a 2,070-guest park on the emulator:
+            // 28.2 fps against 27.2 with it on. Still switchable in the options.
+            model->multiThreading = reader->GetBoolean("multithreading", false);
 #else
             model->multiThreading = reader->GetBoolean("multithreading", true);
 #endif // _DEBUG
@@ -271,6 +279,17 @@ namespace OpenRCT2::Config
             model->enabledAssetPacks = reader->GetString("enabled_asset_packs", "");
             model->transparentScreenshot = reader->GetBoolean("transparent_screenshot", true);
             model->transparentWater = reader->GetBoolean("transparent_water", true);
+#ifdef __amigaos__
+            // Transparent bars cost a full-width viewport paint under each of them on every scrolled frame.
+            model->solidWindows = reader->GetBoolean("solid_windows", true);
+            // Guest path searches that cannot reach their goal run into the 15000-tile budget; in a park with 1500
+            // guests those two-per-tick searches were 80% of the whole simulation on a 68k. They return a best-effort
+            // direction either way; a smaller budget only changes that fallback. 15000 restores PC behaviour.
+            model->pathfindTileBudget = reader->GetInt32("pathfind_tile_budget", 4000);
+#else
+            model->solidWindows = reader->GetBoolean("solid_windows", false);
+            model->pathfindTileBudget = reader->GetInt32("pathfind_tile_budget", 15000);
+#endif
 
             model->invisibleRides = reader->GetBoolean("invisible_rides", false);
             model->invisibleVehicles = reader->GetBoolean("invisible_vehicles", false);
@@ -369,6 +388,8 @@ namespace OpenRCT2::Config
         writer->WriteEnum<VirtualFloorStyles>("virtual_floor_style", model->virtualFloorStyle, Enum_VirtualFloorStyle);
         writer->WriteBoolean("transparent_screenshot", model->transparentScreenshot);
         writer->WriteBoolean("transparent_water", model->transparentWater);
+        writer->WriteBoolean("solid_windows", model->solidWindows);
+        writer->WriteInt32("pathfind_tile_budget", model->pathfindTileBudget);
         writer->WriteBoolean("invisible_rides", model->invisibleRides);
         writer->WriteBoolean("invisible_vehicles", model->invisibleVehicles);
         writer->WriteBoolean("invisible_trees", model->invisibleTrees);
@@ -399,7 +420,18 @@ namespace OpenRCT2::Config
             model->toolbarShowRotateAnticlockwise = reader->GetBoolean("toolbar_show_rotate_anti_clockwise", false);
             model->consoleSmallFont = reader->GetBoolean("console_small_font", false);
             model->currentThemePreset = reader->GetString("current_theme", "*RCT2");
+#ifdef __amigaos__
+            // The OpenRCT2 sequence shows large community parks with hundreds of guests: minutes to load and
+            // 1-2 fps on a 68k. The Amiga sequence tours the empty RCT2 beginner scenarios instead.
+            model->currentTitleSequencePreset = reader->GetString("current_title_sequence", "Amiga");
+            if (model->currentTitleSequencePreset == "*OPENRCT2")
+            {
+                // A config written by an earlier build carries upstream's default; nobody chose it on a 68k.
+                model->currentTitleSequencePreset = "Amiga";
+            }
+#else
             model->currentTitleSequencePreset = reader->GetString("current_title_sequence", "*OPENRCT2");
+#endif
             model->randomTitleSequence = reader->GetBoolean("random_title_sequence", false);
             model->objectSelectionFilterFlags = reader->GetInt32("object_selection_filter_flags", 0x3FFF);
             model->scenarioSelectLastTab = reader->GetInt32("scenarioselect_last_tab", 0);

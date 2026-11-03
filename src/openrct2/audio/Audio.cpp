@@ -261,7 +261,12 @@ namespace OpenRCT2::Audio
     static std::map<TitleMusicKind, std::string_view> GetAvailableMusicMap()
     {
         auto musicMap = std::map<TitleMusicKind, std::string_view>{
+#ifndef __amigaos__
             { TitleMusicKind::OpenRCT2, AudioObjectIdentifiers::kOpenRCT2Title },
+#else
+            // No Ogg/Vorbis decoder in the AmigaOS build: OpenRCT2's own theme cannot play, use RCT2's.
+            { TitleMusicKind::OpenRCT2, AudioObjectIdentifiers::kRCT2Title },
+#endif
             { TitleMusicKind::RCT2, AudioObjectIdentifiers::kRCT2Title },
         };
 
