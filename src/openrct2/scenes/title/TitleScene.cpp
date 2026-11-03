@@ -15,6 +15,7 @@
 #include "../../GameState.h"
 #include "../../Input.h"
 #include "../../OpenRCT2.h"
+#include "../../platform/AmigaTrace.h"
 #include "../../audio/Audio.h"
 #include "../../config/Config.h"
 #include "../../core/Console.hpp"
@@ -23,6 +24,7 @@
 #include "../../interface/Screenshot.h"
 #include "../../interface/Window.h"
 #include "../../network/NetworkBase.h"
+#include "../../object/ObjectManager.h"
 #include "../../scenario/ScenarioRepository.h"
 #include "../../scenes/SceneManager.h"
 #include "../../ui/UiContext.h"
@@ -36,6 +38,14 @@ using namespace OpenRCT2;
 
 // TODO Remove when no longer required.
 bool gPreviewingTitleSequenceInGame;
+
+#ifdef __amigaos__
+static bool AmigaSkipTitlePark()
+{
+    static const bool skip = amiga_env_flag("OPENRCT2_SKIP_TITLE") != 0;
+    return skip;
+}
+#endif
 
 ITitleSequencePlayer* TitleScene::GetSequencePlayer()
 {
@@ -107,11 +117,30 @@ void TitleScene::Load()
 #endif
     gameStateInitAll(getGameState(), kDefaultMapSize);
     ContextResetSubsystems();
+#if defined(__amigaos__) && defined(OPENRCT2_SMALL_MEMORY)
+    if (AmigaSkipTitlePark())
+    {
+        // The old scene has stopped, the map/entities have been reset and
+        // park windows are closed. A static menu has no park that needs these
+        // sprites. Release them before a preview/import allocates its buffers.
+        AMIGA_TRACE_HEAP("static menu before park objects released");
+        GetContext().GetObjectManager().UnloadAllTransient();
+        AMIGA_TRACE_HEAP("static menu after park objects released");
+    }
+#endif
     ContextOpenWindow(WindowClass::mainWindow);
 
     TitleInitialise();
+#ifdef __amigaos__
+    if (AmigaSkipTitlePark())
+        AMIGA_TRACE("title: static menu requested; no demonstration park loaded");
+#endif
 
-    if (_sequencePlayer != nullptr)
+    if (_sequencePlayer != nullptr
+#ifdef __amigaos__
+        && !AmigaSkipTitlePark()
+#endif
+    )
     {
         // Force the title sequence to load / update so we
         // don't see a blank screen for a split second.
@@ -142,6 +171,10 @@ void TitleScene::Tick()
 
     if (!gOpenRCT2Headless && GameIsNotPaused())
     {
+#ifdef __amigaos__
+        if (!AmigaSkipTitlePark())
+        {
+#endif
         TryLoadSequence();
         _sequencePlayer->Update();
 
@@ -155,6 +188,9 @@ void TitleScene::Tick()
             gameStateUpdateLogic();
         }
         Drawing::UpdatePaletteEffects();
+#ifdef __amigaos__
+        }
+#endif
         // update_weather_animation();
     }
 

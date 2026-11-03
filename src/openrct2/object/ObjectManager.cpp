@@ -628,6 +628,39 @@ namespace OpenRCT2
             std::sort(objectsToLoad.begin(), objectsToLoad.end());
             objectsToLoad.erase(std::unique(objectsToLoad.begin(), objectsToLoad.end()), objectsToLoad.end());
 
+#ifdef __amigaos__
+            // A failed park load used to leave decoded objects registered in the
+            // repository when Load() threw, making every subsequent attempt fail.
+            newLoadedObjects.reserve(objectsToLoad.size());
+            badObjects.reserve(objectsToLoad.size());
+            struct LoadRollback
+            {
+                ObjectManager& manager;
+                IObjectRepository& repository;
+                std::vector<Object*>& objects;
+                size_t activated = 0;
+                bool committed = false;
+                ~LoadRollback()
+                {
+                    if (committed)
+                        return;
+                    for (size_t i = 0; i < objects.size(); ++i)
+                    {
+                        auto* object = objects[i];
+                        if (i < activated)
+                        {
+                            try { manager.UnloadObject(object); } catch (...) {}
+                            continue;
+                        }
+                        const auto* item = repository.FindObject(object->GetDescriptor());
+                        if (item != nullptr)
+                            repository.UnregisterLoadedObject(item, object);
+                    }
+                    AMIGA_TRACE("objects: failed load rolled back");
+                }
+            } rollback{ *this, _objectRepository, newLoadedObjects };
+#endif
+
             // Prepare for loading objects multi-threaded
             std::atomic<int> numProcessed = 0;
             auto numRequired = objectsToLoad.size();
@@ -662,7 +695,14 @@ namespace OpenRCT2
             };
 
             // Dispatch loading the objects
+#ifdef __amigaos__
+            // Object factories use DOS file I/O and shared image/load state.
+            // Keep them on the owning task even in the rendering-worker build.
+            AMIGA_TRACE("objects: loading on main task (rendering workers remain available)");
+            JobPool jobs{ 0 };
+#else
             JobPool jobs{};
+#endif
             for (auto* object : objectsToLoad)
             {
                 jobs.AddTask([object, &loadSingleObject]() { loadSingleObject(object); }, completionFn);
@@ -689,10 +729,18 @@ namespace OpenRCT2
             }
 
             // Load objects
+#ifdef __amigaos__
+            // Do not register sprites/strings for a park already known to be incomplete.
+            if (!badObjects.empty())
+                throw ObjectLoadException(std::move(badObjects));
+#endif
             ::gImageAllocStat[0] = ::gImageAllocStat[1] = 0;
             [[maybe_unused]] const uint32_t tLoad = Platform::GetTicks();
             for (auto* obj : newLoadedObjects)
             {
+#ifdef __amigaos__
+                ++rollback.activated;
+#endif
                 obj->Load();
             }
             AMIGA_TRACE((std::string("objects: ") + std::to_string(newLoadedObjects.size()) + " of " + std::to_string(requiredObjects.size())
@@ -756,6 +804,9 @@ namespace OpenRCT2
             }
 
             LOG_VERBOSE("%u / %u new objects loaded", newLoadedObjects.size(), requiredObjects.size());
+#ifdef __amigaos__
+            rollback.committed = true;
+#endif
         }
 
         Object* GetOrLoadObject(const ObjectRepositoryItem* ori)

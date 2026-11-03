@@ -9,6 +9,7 @@
  * test16..test19). When the ring runs dry (park loads, slow frames) the process plays silence and counts an
  * underrun; nothing waits on the main loop. */
 #ifdef __amigaos__
+#define NO_INLINE_STDARG
     #include "amiga_audio.h"
 
     #include <devices/ahi.h>
@@ -272,9 +273,11 @@ static int open_backend(int freq, int frames, int numBuffers)
         amiga_audio_close();
         return 0;
     }
-    if (CreateNewProcTags(
-            NP_Entry, (ULONG)audio_process, NP_Name, (ULONG) "OpenRCT2 audio", NP_Priority, 2, NP_StackSize, 32768, TAG_DONE)
-        == NULL)
+    const struct TagItem processTags[] = {
+        { NP_Entry, (ULONG)audio_process }, { NP_Name, (ULONG)"OpenRCT2 audio" },
+        { NP_Priority, 2 }, { NP_StackSize, 32768 }, { TAG_DONE, 0 }
+    };
+    if (CreateNewProc(processTags) == NULL)
     {
         amiga_audio_close();
         return 0;

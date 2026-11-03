@@ -455,7 +455,7 @@ SDL_Window* SDL_CreateWindow(const char* title, int, int, int w, int h, Uint32)
     int aw = 0, ah = 0;
     if (!amiga_ui_open(w, h, title, &aw, &ah))
     {
-        std::snprintf(g_error, sizeof g_error, "no 8-bit RTG screen mode for %dx%d", w, h);
+        std::snprintf(g_error, sizeof g_error, "%s", amiga_ui_error());
         return nullptr;
     }
     g_window = new SDL_Window();

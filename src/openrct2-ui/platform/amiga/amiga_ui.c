@@ -4,6 +4,10 @@
  *****************************************************************************/
 #ifdef __amigaos__
 
+/* SDK varargs wrappers take &firstTag, which is not a portable tag array
+ * under optimisation. Keep every OS argument list explicit. */
+#define NO_INLINE_STDARG
+
     #include "amiga_ui.h"
     #include "amiga_c2p8.h"
 
@@ -37,6 +41,19 @@ struct Library* KeymapBase = NULL;
 static struct Screen* s_screen = NULL;
 static struct Window* s_window = NULL;
 static int s_width = 0, s_height = 0;
+static int use_aga(void);
+static char s_error[256];
+
+const char* amiga_ui_error(void) { return s_error; }
+
+static void screen_error(const char* stage, long code)
+{
+    snprintf(s_error, sizeof s_error, "%s %s failed (code %ld); Chip free %lu, largest %lu; Fast free %lu",
+        use_aga() ? "AGA" : "RTG", stage, code,
+        (unsigned long)AvailMem(MEMF_CHIP), (unsigned long)AvailMem(MEMF_CHIP | MEMF_LARGEST),
+        (unsigned long)AvailMem(MEMF_FAST));
+    amiga_trace(s_error);
+}
 static int s_mouseX = 0, s_mouseY = 0, s_buttons = 0;
 static ULONG s_palette[1 + 256 * 3 + 1];
 static Object* s_pointerObj = NULL;
@@ -190,20 +207,26 @@ int amiga_ui_desktop_size(int* width, int* height)
 int amiga_ui_open(int width, int height, const char* title, int* outWidth, int* outHeight)
 {
     ULONG modeId;
+    LONG screenError = 0;
     amiga_ui_close();
+    s_error[0] = 0;
     modeId = find_mode(width, height);
     if (modeId == (ULONG)INVALID_ID)
+    {
+        screen_error("display mode selection", OSERR_UNKNOWNMODE);
         return 0;
+    }
     if (use_aga())
     {
         int plane;
         width = 640; height = 512;
         s_agaBitmap = AllocBitMap(width, height, 8, BMF_DISPLAYABLE | BMF_CLEAR, NULL);
-        if (!s_agaBitmap) return 0;
+        if (!s_agaBitmap) { screen_error("Chip bitmap allocation", OSERR_NOCHIPMEM); return 0; }
         s_agaPitch = s_agaBitmap->BytesPerRow;
         s_agaPlaneSize = s_agaPitch * height;
         if (s_agaBitmap->Depth != 8 || (s_agaPitch & 3) || (s_agaBitmap->Flags & BMF_INTERLEAVED))
         {
+            screen_error("bitmap layout", 0);
             free_aga();
             return 0;
         }
@@ -211,7 +234,7 @@ int amiga_ui_open(int width, int height, const char* title, int* outWidth, int* 
         {
             if (!s_agaBitmap->Planes[plane] || !(TypeOfMem(s_agaBitmap->Planes[plane]) & MEMF_CHIP))
             {
-                amiga_trace("ui: AGA bitmap was not planar Chip RAM");
+                screen_error("planar Chip bitmap validation", 0);
                 free_aga();
                 return 0;
             }
@@ -220,6 +243,7 @@ int amiga_ui_open(int width, int height, const char* title, int* outWidth, int* 
         s_agaShadow = AllocVec(8 * s_agaPlaneSize, MEMF_FAST | MEMF_CLEAR);
         if (!s_agaPlanes || !s_agaShadow)
         {
+            screen_error("Fast bitmap allocation", OSERR_NOMEM);
             free_aga();
             return 0;
         }
@@ -234,21 +258,31 @@ int amiga_ui_open(int width, int height, const char* title, int* outWidth, int* 
         width = mw;
         height = mh;
     }
-    s_screen = OpenScreenTags(
-        NULL, SA_DisplayID, modeId, SA_Width, width, SA_Height, height, SA_Depth, 8, SA_Title, (ULONG)title, SA_Quiet, TRUE,
-        SA_ShowTitle, FALSE, SA_Behind, FALSE, s_agaBitmap ? SA_BitMap : TAG_IGNORE, (ULONG)s_agaBitmap, TAG_DONE);
+    const struct TagItem screenTags[] = {
+        { SA_DisplayID, modeId }, { SA_Width, width }, { SA_Height, height }, { SA_Depth, 8 },
+        { SA_Title, (ULONG)title }, { SA_Quiet, TRUE }, { SA_ShowTitle, FALSE }, { SA_Behind, FALSE },
+        { s_agaBitmap ? SA_BitMap : TAG_IGNORE, (ULONG)s_agaBitmap },
+        { SA_ErrorCode, (ULONG)&screenError }, { TAG_DONE, 0 }
+    };
+    s_screen = OpenScreenTagList(NULL, screenTags);
     if (s_screen == NULL)
     {
+        screen_error("OpenScreenTagList", screenError);
         free_aga();
         return 0;
     }
-    s_window = OpenWindowTags(
-        NULL, WA_CustomScreen, (ULONG)s_screen, WA_Left, 0, WA_Top, 0, WA_Width, s_screen->Width, WA_Height, s_screen->Height,
-        WA_Backdrop, TRUE, WA_Borderless, TRUE, WA_Activate, TRUE, WA_RMBTrap, TRUE, WA_NoCareRefresh, TRUE, WA_SimpleRefresh,
-        TRUE, WA_ReportMouse, TRUE, WA_IDCMP,
-        IDCMP_RAWKEY | IDCMP_MOUSEMOVE | IDCMP_MOUSEBUTTONS | IDCMP_ACTIVEWINDOW | IDCMP_INACTIVEWINDOW, TAG_DONE);
+    const struct TagItem windowTags[] = {
+        { WA_CustomScreen, (ULONG)s_screen }, { WA_Left, 0 }, { WA_Top, 0 },
+        { WA_Width, s_screen->Width }, { WA_Height, s_screen->Height },
+        { WA_Backdrop, TRUE }, { WA_Borderless, TRUE }, { WA_Activate, TRUE }, { WA_RMBTrap, TRUE },
+        { WA_NoCareRefresh, TRUE }, { WA_SimpleRefresh, TRUE }, { WA_ReportMouse, TRUE },
+        { WA_IDCMP, IDCMP_RAWKEY | IDCMP_MOUSEMOVE | IDCMP_MOUSEBUTTONS | IDCMP_ACTIVEWINDOW | IDCMP_INACTIVEWINDOW },
+        { TAG_DONE, 0 }
+    };
+    s_window = OpenWindowTagList(NULL, windowTags);
     if (s_window == NULL)
     {
+        screen_error("OpenWindowTagList", IoErr());
         CloseScreen(s_screen);
         s_screen = NULL;
         free_aga();
@@ -339,7 +373,11 @@ static int lock_blit(const unsigned char* src, int srcPitch, int x, int y, int w
     ULONG fmt = ~0UL, bpr = 0;
     UBYTE* base = NULL;
     int row;
-    handle = LockBitMapTags(s_screen->RastPort.BitMap, LBMI_PIXFMT, (ULONG)&fmt, LBMI_BYTESPERROW, (ULONG)&bpr, LBMI_BASEADDRESS, (ULONG)&base, TAG_DONE);
+    const struct TagItem lockTags[] = {
+        { LBMI_PIXFMT, (ULONG)&fmt }, { LBMI_BYTESPERROW, (ULONG)&bpr },
+        { LBMI_BASEADDRESS, (ULONG)&base }, { TAG_DONE, 0 }
+    };
+    handle = LockBitMapTagList(s_screen->RastPort.BitMap, lockTags);
     if (handle == NULL)
         return 0;
     if (fmt != PIXFMT_LUT8 || base == NULL || bpr == 0)
@@ -547,6 +585,12 @@ static int pen_luma(int pen)
     return (int)(r * 3 + g * 6 + b);
 }
 
+static void set_window_pointer(Object* pointer)
+{
+    const struct TagItem tags[] = { { WA_Pointer, (ULONG)pointer }, { TAG_DONE, 0 } };
+    SetWindowPointerA(s_window, tags);
+}
+
 int amiga_ui_set_pointer(const unsigned char* data, const unsigned char* mask, int w, int h, int hotX, int hotY)
 {
     struct BitMap* bm;
@@ -579,17 +623,19 @@ int amiga_ui_set_pointer(const unsigned char* data, const unsigned char* mask, i
                 p1[x / 8] |= bit;
         }
     }
-    obj = NewObject(
-        NULL, (STRPTR) "pointerclass", POINTERA_BitMap, (ULONG)bm, POINTERA_XOffset, -hotX, POINTERA_YOffset, -hotY,
-        POINTERA_WordWidth, (ULONG)((w + 15) / 16), POINTERA_XResolution, POINTERXRESN_SCREENRES, POINTERA_YResolution,
-        POINTERYRESN_SCREENRES, TAG_DONE);
+    const struct TagItem pointerTags[] = {
+        { POINTERA_BitMap, (ULONG)bm }, { POINTERA_XOffset, (ULONG)-hotX }, { POINTERA_YOffset, (ULONG)-hotY },
+        { POINTERA_WordWidth, (ULONG)((w + 15) / 16) }, { POINTERA_XResolution, POINTERXRESN_SCREENRES },
+        { POINTERA_YResolution, POINTERYRESN_SCREENRES }, { TAG_DONE, 0 }
+    };
+    obj = NewObjectA(NULL, (STRPTR)"pointerclass", pointerTags);
     if (obj == NULL)
     {
         FreeBitMap(bm);
         return 0;
     }
     if (s_pointerShown)
-        SetWindowPointer(s_window, WA_Pointer, (ULONG)obj, TAG_DONE);
+        set_window_pointer(obj);
     free_pointer_shape(s_pointerObj, s_pointerBM); /* after the switch: intuition must not see it vanish first */
     s_pointerObj = obj;
     s_pointerBM = bm;
@@ -599,7 +645,7 @@ int amiga_ui_set_pointer(const unsigned char* data, const unsigned char* mask, i
 void amiga_ui_reset_pointer(void)
 {
     if (s_window != NULL && s_pointerShown)
-        SetWindowPointer(s_window, WA_Pointer, 0, TAG_DONE);
+        set_window_pointer(NULL);
     free_pointer_shape(s_pointerObj, s_pointerBM);
     s_pointerObj = NULL;
     s_pointerBM = NULL;
@@ -614,7 +660,7 @@ void amiga_ui_show_pointer(int show)
     if (!show)
         SetPointer(s_window, blank, 1, 16, 0, 0);
     else if (s_pointerObj != NULL)
-        SetWindowPointer(s_window, WA_Pointer, (ULONG)s_pointerObj, TAG_DONE);
+        set_window_pointer(s_pointerObj);
     else
         ClearPointer(s_window);
 }
@@ -633,8 +679,9 @@ int amiga_ui_request(const char* title, const char* body, const char* gadgets)
     es.es_Title = (UBYTE*)title;
     es.es_TextFormat = (UBYTE*)"%s";
     es.es_GadgetFormat = (UBYTE*)gadgets;
-    r = EasyRequest(s_window, &es, NULL, body);
-    /* EasyRequest: 1..n-1 for the left gadgets, 0 for the rightmost */
+    const char* args[] = { body };
+    r = EasyRequestArgs(s_window, &es, NULL, (APTR)args);
+    /* EasyRequestArgs: 1..n-1 for the left gadgets, 0 for the rightmost */
     if (r == 0)
         return n - 1;
     return (int)r - 1;

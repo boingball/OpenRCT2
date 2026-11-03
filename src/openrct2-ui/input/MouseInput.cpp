@@ -285,6 +285,18 @@ namespace OpenRCT2
 
         // Get window and widget under cursor position
         w = windowMgr->FindFromPoint(screenCoords);
+#ifdef __amigaos__
+        // Loading/connection dialogs must not let title-menu clicks start a
+        // second load while the network handshake is pumping UI messages.
+        auto* modal = windowMgr->FindByClass(WindowClass::progressWindow);
+        if (modal == nullptr)
+            modal = windowMgr->FindByClass(WindowClass::networkStatus);
+        if (modal != nullptr && w != modal)
+        {
+            _inputState = InputState::reset;
+            return;
+        }
+#endif
         widgetIndex = w == nullptr ? kWidgetIndexNull : windowMgr->FindWidgetFromPoint(*w, screenCoords);
         widget = widgetIndex == kWidgetIndexNull ? nullptr : &w->widgets[widgetIndex];
 

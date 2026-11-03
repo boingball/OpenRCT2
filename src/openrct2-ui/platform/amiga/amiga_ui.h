@@ -32,6 +32,7 @@ typedef struct amiga_ui_event
 /* Opens an 8-bit RTG screen, or fixed PAL AGA 640x512 with OPENRCT2_DISPLAY=AGA.
  * Returns 1 and the actual size on success. */
 int amiga_ui_open(int width, int height, const char* title, int* outWidth, int* outHeight);
+const char* amiga_ui_error(void);
 void amiga_ui_close(void);
 int amiga_ui_is_open(void);
 

@@ -929,7 +929,16 @@ namespace OpenRCT2
         }
         else if (useMultithreading == false && _paintJobs != nullptr)
         {
+#ifdef __amigaos__
+            // Do not destroy worker tasks/TLS/allocator state in a live paint
+            // when the option changes. Drain and park them; OFF still runs
+            // all subsequent paint work on the caller. Re-enabling reuses
+            // the pool, and normal static shutdown owns final destruction.
+            _paintJobs->Join();
+            AMIGA_TRACE_ONCE("paint: multithreading off; drained workers retained idle until shutdown");
+#else
             _paintJobs.reset();
+#endif
         }
 
         bool useParallelDrawing = false;

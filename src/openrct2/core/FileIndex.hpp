@@ -64,7 +64,12 @@ private:
     };
 
     // Index file format version which when incremented forces a rebuild
+#if defined(__amigaos__) && defined(OPENRCT2_AMIGA_THREADS)
+    // Rebuild indexes potentially cached by the first threaded I/O experiment.
+    static constexpr uint8_t kFileIndexVersion = 5;
+#else
     static constexpr uint8_t kFileIndexVersion = 4;
+#endif
 
     std::string const _name;
     uint32_t const _magicNumber;
@@ -190,7 +195,12 @@ private:
         const size_t totalCount = scanResult.Files.size();
         if (totalCount > 0)
         {
+#ifdef __amigaos__
+            AMIGA_TRACE("index: building on main task");
+            JobPool jobPool{ 0 };
+#else
             JobPool jobPool;
+#endif
             std::mutex mtx;
             std::atomic<size_t> processed{ 0 };
 

@@ -1,0 +1,43 @@
+; 0.22: experimental two-worker and matching-profile LAN build.
+; OpenRCT2 for AmigaOS 3.2 (68k) -- tester build launcher
+;
+; This script expects to be started from the OpenRCT2 drawer: double-click its
+; icon on Workbench, or  CD  into the drawer first in a Shell.
+;
+; The game needs the data files of the original RollerCoaster Tycoon 2.
+; Make an assign that points at your RCT2 folder (the one holding Data,
+; ObjData, Scenarios and Tracks), for example:
+;
+;     Assign RCT2: Work:Games/RCT2
+;
+; and put that line into S:User-Startup to keep it after a reboot.
+; Alternatively pass the folder as an argument:  OpenRCT2 Work:Games/RCT2/
+;
+.key RCT2DIR
+.def RCT2DIR "RCT2:"
+Failat 21
+If "<RCT2DIR>" EQ "RCT2:"
+  Assign >NIL: RCT2: EXISTS
+  If WARN
+    Echo "RCT2: has not been assigned to your original RollerCoaster Tycoon 2 installation."
+    Echo "The included data drawer is OpenRCT2's extra data; it does not contain Data/G1.DAT."
+    Echo "Example: Assign RCT2: Work:Games/RollerCoasterTycoon2"
+    Quit 10
+  EndIf
+EndIf
+If NOT EXISTS "bin/OpenRCT2Check"
+  Echo "OpenRCT2: bin/OpenRCT2Check is missing; install the launcher update completely."
+  Quit 10
+EndIf
+Stack 1048576
+bin/OpenRCT2Check "<RCT2DIR>"
+If WARN
+  Quit 10
+EndIf
+If NOT EXISTS "bin/openrct2-experimental"
+  Echo "OpenRCT2: please start this script from inside the OpenRCT2 drawer."
+  Quit 10
+EndIf
+; Keep option values as separate arguments. The Amiga CRT preserves quotes
+; embedded after '=' (for example --rct2-data-path="RCT2:") as path characters.
+bin/openrct2-experimental --rct2-data-path "<RCT2DIR>" --openrct2-data-path "data" --user-data-path "user-experimental22"

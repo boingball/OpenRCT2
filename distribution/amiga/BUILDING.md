@@ -109,3 +109,58 @@ ASAN_OPTIONS=detect_leaks=0 /tmp/paula-lifecycle
 ```
 The mocked lifecycle test does not validate physical audio.device timing.
 Select `OPENRCT2_AUDIO=PAULA` at runtime to bypass AHI completely.
+
+Experimental LAN/thread build (keep separate from the offline binary):
+```
+AMIGA_CPU_FLAGS='-m68060 -msoft-float' sh distribution/amiga/configure.sh \
+  build/experimental22 /path/to/deps /path/to/open4 \
+  -DOPENRCT2_SMALL_MEMORY=ON -DDISABLE_NETWORK=OFF \
+  -DOPENRCT2_AMIGA_LAN_EXPERIMENT=ON -DOPENRCT2_AMIGA_THREADS=ON \
+  -DOPENRCT2_BUILD_CORE_BENCH=ON
+cmake --build build/experimental22 --target openrct2 \
+  openrct2-job-pool-test openrct2-network-wire-test \
+  openrct2-amilan-bridge-test openrct2-network-crypto-test -j4
+```
+Use an AmiSSL v5 developer SDK in the cross-compiler include directory.
+The runtime is opened lazily; no libamisslauto startup dependency is linked.
+See amiga/core/tests/{amilan_transport,network_fragments,job_pool}.cpp for
+host reference tests. The Amiga bridge test uses an actual synthetic library
+vector and the production assembly. The native worker and crypto tests are
+included for a real AmigaOS/WinUAE test, not marked passed by a version run.
+
+### Explicit OS tag lists (0.26)
+
+Use `OpenScreenTagList`, `OpenWindowTagList`, `NewObjectA`,
+`SetWindowPointerA`, `EasyRequestArgs`, `LockBitMapTagList` and
+`CreateNewProc` with explicit arrays. The official NDK 3.2 inline stdarg
+wrappers cast `&firstTag` to a tag array. With open4 GCC 16 at `-O3`, the
+following varargs values can be discarded: screen creation received only
+the first tag followed by unrelated stack contents. `NO_INLINE_STDARG` in
+the display/audio units prevents reintroducing these wrappers.
+
+`tools/ndk-tags-check.c` installs a fake Intuition LVO -612 vector that checks
+the real A1 argument, without needing a screen implementation. Compile at
+`-m68060 -msoft-float -mcrt=nix20 -O3`, then link separately with
+`-m68000 -msoft-float -mcrt=nix20`. The normal explicit-array version must
+print PASS. Building with `-DTEST_SDK_VARARGS` reproduces FAIL with this SDK
+and compiler. This verifies argument delivery, not physical screen creation.
+
+Screen failures now report the failing stage, OS screen error code and
+free/largest Chip RAM. A top-level exception handler unwinds owned contexts
+and returns 20 to Shell instead of calling abort for a startup exception.
+
+### Static-menu park release (0.27)
+
+On the Amiga small-memory profile, entering the static title menu calls
+`UnloadAllTransient()` after the previous scene stops, the game state resets
+and park windows close. Audio objects remain loaded. Without this step, the
+static title bypasses the sequence load that ordinarily replaces old objects;
+a second scenario's classification/preview/import has to coexist with the
+previous park's sprite data. The tester log retained roughly 76 MB in use
+at the menu versus 38 MB on first startup, then reported `std::bad_alloc`.
+
+`openrct2-object-rollback-test` exercises the production ObjectManager with
+injected allocation failure, repeated transient unload/reload, retained audio
+identity and final cleanup. Hardware menu/second-park testing remains needed.
+Use `OpenRCT2-A1200` to select the static menu and Paula. No simulation or
+rendering algorithm changes are included in 0.27.

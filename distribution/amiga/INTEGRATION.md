@@ -350,3 +350,166 @@ music/effects do not require it. Classic assets and Ogg custom music would
 need a decoder. MintAMP uses fixed-point Tremor, but its sequential adapter
 does not implement the seek/loop behaviour required here; do not transplant
 that adapter unchanged or enable floating-point libvorbis for this target.
+
+### Experimental job workers and LAN (0.22)
+
+This is a separate executable/profile for testing; do not replace the 0.21
+fallback. Configure OPENRCT2_AMIGA_THREADS=ON, DISABLE_NETWORK=OFF and
+OPENRCT2_AMIGA_LAN_EXPERIMENT=ON, retaining OPENRCT2_SMALL_MEMORY=ON and
+68060/software-float flags. OPENRCT2_AMIGA_THREADS enables blocking allocator
+locks and caps JobPool at two 256-KiB workers. The Multithreading checkbox
+then enables actual viewport jobs, including the X8 parallel drawing path.
+Other job-pool users (such as loading) can use workers independently of the
+checkbox. No multicore 68060 speedup is promised.
+
+The socket interface delegates raw transport to the AmiLAN Amiga backend.
+OpenRCT2 retains its existing protocol, RSA authentication, map transfer,
+commands, tick checksums and LAN discovery datagrams. No AmiLAN framing or
+512-byte message limit is imposed on OpenRCT2's stream. Numeric IPv4 only;
+no DNS/IPv6, internet master listing, HTTP object downloads or scripting.
+The socket API is owned by the OS task using it. Accepted sockets share
+the listener's library base; all descriptors close before the base.
+
+The constrained build appends -amiga-small-v1 to the existing network version
+so standard/Thomas builds cannot inadvertently join with different caps.
+This is a compatibility gate, not proof of determinism. Test two identical
+0.22 builds with a small park first. Existing map/entity/ride/tile caps remain.
+
+AmiSSL v5/OpenSSL 3 API is opened lazily for OpenRCT2 RSA operations. Its
+entropy and RSA checks remain in place; no authentication bypass is added.
+The RCT1 patch SHA256 uses the existing picosha2 path on Amiga so ordinary
+single-player patching does not require AmiSSL. Crypto cleanup occurs after
+C++ teardown and before allocator cleanup. The SDK headers are needed at
+build time; an installed compatible AmiSSL runtime is needed for networking.
+
+Host ASan/UBSan checks cover the actual job pool, real TCP 1 MiB partial I/O,
+accepted-socket lifetime, EOF, invalid address, raw UDP and the actual packet
+serializer/parser using two-byte writes and one-byte reads. That last check
+also covers a repaired short-header read in Connection::readPacket().
+Native no-FPU checks pass fixed Packet bytes, the actual assembly library
+bridge and GUI version/startup/shutdown. The native worker test is blocked
+by volamos's unimplemented CreateNewProc. The crypto test reports missing
+AmiSSL there. Audible audio, graphical worker stability, live AmiSSL/RSA,
+Amiga sockets, join/map transfer and sustained synchronisation require
+WinUAE/hardware tests; multiplayer is not yet validated end to end.
+
+On Amiga the client opens TCP after generating/loading its local key, so a
+slow first-time RSA generation does not consume the server handshake timeout.
+Key generation failure stops the join; it is not treated as a valid identity.
+
+### 0.22.1: keep file loading on its owning task
+
+A WinUAE tester reports most objects missing/corrupt when loading Crazy Castle
+with 0.22. That build enabled workers in ObjectManager and FileIndex as well
+as viewport rendering. The screenshot alone does not establish the exact
+failure (DOS task context, shared object-loader state or another issue).
+
+On Amiga, ObjectManager loading and FileIndex building now explicitly request
+JobPool(0), retaining the established main-task file I/O path. Experimental
+viewport workers remain enabled. The threaded Amiga file-index format version
+is bumped to force rebuilding potentially incomplete caches from 0.22. This
+changes caches only, not park saves, network protocol or capacity limits.
+The same user-experimental22 profile is retained. Trace records both the
+main-task loader/index path and separate viewport worker creation.
+
+The actual JobPool regression checks explicit zero-worker dispatch/completion
+on the caller, then the two-worker path. WinUAE park loading/rendering still
+requires tester confirmation; this is a targeted isolation fix, not a claim
+that threaded Amiga file I/O has been repaired.
+
+The follow-up WinUAE console confirms OpenRCT2ThreadTest PASS for actual
+workers. It also shows absolute object.json paths opening with nonzero file
+sizes but reads failing at position zero with EOF set and no stream error.
+This supports isolating file I/O from workers; it is not a missing-file
+report and does not yet identify the runtime's precise stdio/task defect.
+
+## 0.23: A1200 loading and LAN browser corrections
+
+The first physical A1200 test of 0.22.1 reached the menu after about eight
+minutes, but Crazy Castle failed with bad_alloc and file-open errors. Only
+about 9 MB system memory remained. This was a failed park load, not a
+successful real-hardware gameplay test.
+
+* Small-memory Amiga JSON objects share immutable base G1 pixels. Object
+  headers, offsets and zoom links remain private; temporary, CSG, PNG and
+  legacy DAT pixels retain their original ownership. The graphics bank is
+  released after objects at context shutdown.
+* Paint-session pool segments contain two sessions instead of 32 in the
+  small-memory profile, avoiding a large contiguous allocation at first paint.
+* Failed object batches unregister their newly decoded objects and undo
+  activation. Legacy image-source caches clear even if decoding throws.
+* File streams use bounded 1-16 KiB buffers; open failures log errno and
+  available memory. Their underlying cause is not yet isolated on hardware.
+* Trace append operations are serialized with an Exec signal semaphore,
+  preventing concurrent writers from overwriting/interleaving lines.
+* The OpenRCT2-A1200 launcher selects AGA and Paula and sets
+  OPENRCT2_SKIP_TITLE=1. Its static title menu intentionally has no demo park;
+  choose a scenario directly. Experimental-AGA retains the animated title.
+* The Amiga server browser polls LAN discovery on the UI task, with a two
+  second deadline and a 16-packet-per-update work bound. It makes no public
+  master-server HTTP request and starts no nested async socket workers.
+  Add Server still accepts an IPv4 address for a compatible-profile peer.
+
+Validation: actual ImageTable JSON loading with a generated G1 bank checks
+shared pointers, independent offsets, both zoom levels, mixed ownership and
+16 destruction/reload rounds. Actual ObjectManager testing injects bad_alloc
+during activation, verifies rollback, then retries and shuts down. Both pass
+in volamos on 68060 with FPU disabled, dirty heap and sanitizer enabled.
+Native allocator, software-float, RLE zoom and AGA C2P regression checks pass.
+Host ASan/UBSan LAN discovery tests check task ownership, polling bounds,
+malformed packets, timeout/wraparound, restart and failure cleanup.
+
+Full GUI gameplay, 128 MB fit, file-open error resolution and real LAN play
+still require physical hardware validation. No speedup or RAM saving in MB
+is claimed from synthetic tests.
+
+## 0.24: no-scripting multiplayer join
+
+The server sends scriptsData even when scripting is compiled out, with a
+four-byte zero count. The old no-scripting client rejected every such
+packet with "The client requires plugin support", preventing map loading.
+The client now validates/consumes the count and accepts an empty script
+list. Nonzero counts still disconnect a client without plugin support;
+short/inconsistent headers and trailing data after zero are rejected.
+Disconnect uses Connection::disconnect() so the active packet remains alive
+until normal tick cleanup; the existing NetworkBase Close deferral is retained.
+
+Disconnect closes the progress overlay without its cancel callback so an
+error is visible. Amiga mouse input does not activate background windows
+while a progress/network-status dialog is present. Transfer stage traces
+record script count, map byte counts, handler exceptions, map import outcome
+and disconnect reasons, without logging keys or map contents.
+
+Host sanitizer tests exercise production Packet/header parsing for empty
+and nonempty script lists, truncated counts, trailing bytes and inconsistent
+length/cursor values. A native target openrct2-network-scripts-test provides
+the same check. Full host/client join remains a tester gate: the previous
+logs ended cleanly before any network map import and did not capture the
+reported crash. PNG import bad_alloc warnings on that client are a separate
+unresolved issue; this change does not claim to fix them.
+
+## 0.25: AGA conversion and live threading toggle
+
+On a physical 68060 AGA test, Electric Fields loaded all 563 objects and
+ran with roughly 14 MB system memory free. The log ended with allocator
+FOOTERS failures when the tester unticked Multithreading. It does not
+establish whether earlier painting or worker teardown damaged memory.
+
+On Amiga, switching rendering workers off now drains and parks the pool
+instead of destroying tasks/TLS inside a live viewport paint. OFF paints
+on the caller; ON reuses the existing workers. Their two 256-KiB stacks
+remain allocated until normal shutdown. This avoids the reported live
+teardown trigger; it is a workaround, not proof that the underlying heap
+corruption is eliminated. Test clean exit as well as switching off/on.
+
+AGA's big-endian sprite transpose now loads each four-byte input with
+memcpy instead of separately assembling bytes with shifts. GCC emits
+longword loads; memcpy preserves C alignment/aliasing semantics for padded
+or unaligned scanlines. The host path remains explicit big-endian.
+The full native C2P pixel reference, clipping, stride and guard tests pass.
+
+amiga/core/tests/c2p8_bench.c converts 24 full PAL frames and hashes the
+result. Before/after emulator timing uses the same flags, no FPU, dirty
+heap and sanitizer; emulator timing is not physical Chip-RAM bandwidth
+or a gameplay FPS claim. Real hardware AGA conversion timing, thread
+toggle stability and multiplayer completion remain tester gates.

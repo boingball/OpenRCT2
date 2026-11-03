@@ -28,6 +28,11 @@
     #include <openrct2/localisation/Formatter.h>
     #include <openrct2/network/Network.h>
     #include <openrct2/network/ServerList.h>
+#ifdef __amigaos__
+    #include <openrct2/network/LanDiscovery.h>
+    #include <openrct2/platform/Platform.h>
+    #include <openrct2/platform/AmigaTrace.h>
+#endif
     #include <openrct2/ui/WindowManager.h>
 
 using namespace OpenRCT2::Drawing;
@@ -84,6 +89,9 @@ namespace OpenRCT2::Ui::Windows
         u8string _playerName;
         Network::ServerList _serverList;
         std::future<std::pair<std::vector<Network::ServerListEntry>, StringId>> _fetchFuture;
+#ifdef __amigaos__
+        Network::LanDiscovery _lanDiscovery;
+#endif
         uint32_t _numPlayersOnline = 0;
         StringId _statusText = STR_SERVER_LIST_CONNECTING;
 
@@ -115,6 +123,9 @@ namespace OpenRCT2::Ui::Windows
 
         void onClose() override
         {
+#ifdef __amigaos__
+            _lanDiscovery = {};
+#endif
             _serverList = {};
             _fetchFuture = {};
             Config::Save();
@@ -428,6 +439,24 @@ namespace OpenRCT2::Ui::Windows
     private:
         void ServerListFetchServersBegin()
         {
+#ifdef __amigaos__
+            _serverList.Clear();
+            _serverList.ReadAndAddFavourites();
+            _numPlayersOnline = _serverList.GetTotalPlayerCount();
+            _statusText = STR_X_PLAYERS_ONLINE;
+            try
+            {
+                _lanDiscovery.Start(Platform::GetTicks());
+                AMIGA_TRACE("network: LAN discovery on main task; public master server disabled; Add Server accepts IPv4");
+            }
+            catch (const std::exception& e)
+            {
+                _statusText = STR_SERVER_LIST_NO_CONNECTION;
+                AMIGA_TRACE(e.what());
+            }
+            invalidate();
+            return;
+#else
             if (_fetchFuture.valid())
             {
                 // A fetch is already in progress
@@ -474,10 +503,33 @@ namespace OpenRCT2::Ui::Windows
                 }
                 return std::make_pair(allEntries, status);
             });
+#endif
         }
 
         void ServerListFetchServersCheck()
         {
+#ifdef __amigaos__
+            if (!_lanDiscovery.Active())
+                return;
+            try
+            {
+                auto entries = _lanDiscovery.Poll(Platform::GetTicks());
+                _serverList.AddOrUpdateRange(entries);
+                _numPlayersOnline = _serverList.GetTotalPlayerCount();
+                if (!_lanDiscovery.Active())
+                {
+                    _serverList.WriteFavourites();
+                    AMIGA_TRACE("network: LAN discovery finished");
+                }
+            }
+            catch (const std::exception& e)
+            {
+                _lanDiscovery = {};
+                _statusText = STR_SERVER_LIST_NO_CONNECTION;
+                AMIGA_TRACE(e.what());
+            }
+            invalidate();
+#else
             if (_fetchFuture.valid())
             {
                 auto status = _fetchFuture.wait_for(std::chrono::seconds::zero());
@@ -508,6 +560,7 @@ namespace OpenRCT2::Ui::Windows
                     invalidate();
                 }
             }
+#endif
         }
 
         void onPrepareDraw() override

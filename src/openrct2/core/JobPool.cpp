@@ -10,6 +10,7 @@
 #include "JobPool.h"
 
 #include <cassert>
+#include "../platform/AmigaTrace.h"
 
 JobPool::TaskData::TaskData(std::function<void()> workFn, std::function<void()> completionFn)
     : WorkFn(std::move(workFn))
@@ -28,6 +29,9 @@ JobPool::JobPool(size_t maxThreads)
     maxThreads = std::min<size_t>(maxThreads, 2);
 #else
     maxThreads = std::min<size_t>(maxThreads, std::max(1u, std::thread::hardware_concurrency()));
+#endif
+#if defined(__amigaos__) && defined(__m68k__)
+    AMIGA_TRACE(maxThreads ? "jobs: starting worker threads (Amiga maximum two)" : "jobs: inline execution, no worker threads");
 #endif
     for (size_t n = 0; n < maxThreads; n++)
     {
