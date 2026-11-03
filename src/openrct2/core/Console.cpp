@@ -7,12 +7,16 @@
  * OpenRCT2 is licensed under the GNU General Public License version 3.
  *****************************************************************************/
 
+#ifdef __amigaos__
+extern "C" void amiga_trace(const char* line);
+#endif
 #include "Console.hpp"
 
 #include "../Context.h"
 #include "../platform/Platform.h"
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace OpenRCT2::Console
@@ -101,6 +105,11 @@ namespace OpenRCT2::Console
         {
             char buffer[4096];
             std::vsnprintf(buffer, sizeof(buffer), format, args);
+#ifdef __amigaos__
+            // errors are rare and worth a disk write; warnings can come per sprite and are not
+            if (std::strncmp(buffer, "WARNING", 7) != 0)
+                amiga_trace((std::string("CONSOLE-ERROR: ") + buffer).c_str());
+#endif
             auto ctx = GetContext();
             if (ctx != nullptr)
                 ctx->WriteErrorLine(buffer);

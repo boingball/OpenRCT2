@@ -1,0 +1,7 @@
+; Force built-in Paula audio without opening AHI. Start in the game drawer.
+.key RCT2DIR
+.def RCT2DIR "RCT2:"
+Failat 21
+SetEnv OPENRCT2_AUDIO PAULA
+Execute OpenRCT2 "<RCT2DIR>"
+UnsetEnv OPENRCT2_AUDIO

@@ -24,7 +24,11 @@ namespace OpenRCT2::RCT1
 
         // Currently can't detect TD4, as the checksum is the same as SC4 (need alternative method)
 
-        uint32_t checksum = *(reinterpret_cast<const uint32_t*>(&src[length - 4]));
+        // Saved checksum is little-endian and may be unaligned on 68060.
+        uint32_t checksum = static_cast<uint32_t>(src[length - 4])
+            | (static_cast<uint32_t>(src[length - 3]) << 8)
+            | (static_cast<uint32_t>(src[length - 2]) << 16)
+            | (static_cast<uint32_t>(src[length - 1]) << 24);
         uint32_t actualChecksum = 0;
         for (size_t i = 0; i < length - 4; i++)
         {

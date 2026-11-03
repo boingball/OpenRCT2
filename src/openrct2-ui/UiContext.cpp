@@ -43,6 +43,7 @@
 #include <openrct2/drawing/RenderTarget.h>
 #include <openrct2/interface/ScreenCoords.hpp>
 #include <openrct2/interface/Viewport.h>
+#include <openrct2/platform/AmigaTrace.h>
 #include <openrct2/scenes/title/TitleSequencePlayer.h>
 #include <openrct2/ui/UiContext.h>
 #include <openrct2/ui/WindowManager.h>
@@ -605,6 +606,7 @@ public:
      */
     void TriggerResize() override
     {
+        AMIGA_TRACE("ui: resize scale quality begin");
         char scaleQualityBuffer[4];
         _scaleQuality = ScaleQuality::smoothNearestNeighbour;
         if (Config::Get().general.windowScale == std::floor(Config::Get().general.windowScale))
@@ -619,10 +621,13 @@ public:
         }
         snprintf(scaleQualityBuffer, sizeof(scaleQualityBuffer), "%d", static_cast<int32_t>(scaleQuality));
         SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, scaleQualityBuffer);
+        AMIGA_TRACE("ui: resize scale quality ready");
 
         int32_t width, height;
         SDL_GetWindowSize(_window, &width, &height);
+        AMIGA_TRACE("ui: resize dimensions ready");
         OnResize(width, height);
+        AMIGA_TRACE("ui: resize complete");
     }
 
     void CreateWindow() override
@@ -839,9 +844,12 @@ private:
         OnResize(width, height);
 
         UpdateFullscreenResolutions();
-
+        AMIGA_TRACE("ui: initial resolution list ready");
+        AMIGA_TRACE("ui: applying fullscreen setting");
         SetFullscreenMode(static_cast<FullscreenMode>(Config::Get().general.fullscreenMode));
+        AMIGA_TRACE("ui: fullscreen setting applied");
         TriggerResize();
+        AMIGA_TRACE("ui: window setup complete");
     }
 
     void OnResize(int32_t width, int32_t height)
@@ -881,29 +889,36 @@ private:
 
     void UpdateFullscreenResolutions()
     {
-        // Query number of display modes
+        AMIGA_TRACE("ui: resolution query begin");
         int32_t displayIndex = SDL_GetWindowDisplayIndex(_window);
         int32_t numDisplayModes = SDL_GetNumDisplayModes(displayIndex);
+        AMIGA_TRACE("ui: resolution count received");
 
-        // Get desktop aspect ratio
-        SDL_DisplayMode mode;
+        SDL_DisplayMode mode{};
+#ifndef __amigaos__
+        // Only other platforms filter by the desktop aspect ratio. The Amiga
+        // RTG backend offers its actual 8-bit modes regardless of Workbench.
         SDL_GetDesktopDisplayMode(displayIndex, &mode);
-
-        // Get resolutions
-        auto resolutions = std::vector<Resolution>();
         float desktopAspectRatio = static_cast<float>(mode.w) / mode.h;
+#endif
+        auto resolutions = std::vector<Resolution>();
         for (int32_t i = 0; i < numDisplayModes; i++)
         {
-            SDL_GetDisplayMode(displayIndex, i, &mode);
+            if (SDL_GetDisplayMode(displayIndex, i, &mode) != 0)
+                continue;
             if (mode.w > 0 && mode.h > 0)
             {
+#ifdef __amigaos__
+                const bool aspectOk = true;
+#else
                 float aspectRatio = static_cast<float>(mode.w) / mode.h;
-                if (std::fabs(desktopAspectRatio - aspectRatio) < 0.1f)
-                {
+                const bool aspectOk = std::fabs(desktopAspectRatio - aspectRatio) < 0.1f;
+#endif
+                if (aspectOk)
                     resolutions.push_back({ mode.w, mode.h });
-                }
             }
         }
+        AMIGA_TRACE("ui: resolutions collected");
 
         // Sort by area
         std::sort(resolutions.begin(), resolutions.end(), [](const Resolution& a, const Resolution& b) -> bool {
@@ -912,6 +927,7 @@ private:
             return areaA < areaB;
         });
 
+        AMIGA_TRACE("ui: resolutions sorted");
         // Remove duplicates
         auto last = std::unique(resolutions.begin(), resolutions.end(), [](const Resolution& a, const Resolution& b) -> bool {
             return (a.Width == b.Width && a.Height == b.Height);
@@ -922,11 +938,27 @@ private:
         if (!resolutions.empty()
             && (Config::Get().general.fullscreenWidth == -1 || Config::Get().general.fullscreenHeight == -1))
         {
+#ifdef __amigaos__
+            // Every pixel costs on a 68k: default to the smallest mode that fits the game's 640x480 minimum.
+            Resolution pick = resolutions.front();
+            for (const auto& r : resolutions)
+            {
+                if (r.Width >= 640 && r.Height >= 480)
+                {
+                    pick = r;
+                    break;
+                }
+            }
+            Config::Get().general.fullscreenWidth = pick.Width;
+            Config::Get().general.fullscreenHeight = pick.Height;
+#else
             Config::Get().general.fullscreenWidth = resolutions.back().Width;
             Config::Get().general.fullscreenHeight = resolutions.back().Height;
+#endif
         }
 
         _fsResolutions = resolutions;
+        AMIGA_TRACE("ui: resolutions stored");
     }
 
     Resolution GetClosestResolution(int32_t inWidth, int32_t inHeight)

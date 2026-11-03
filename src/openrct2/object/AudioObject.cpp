@@ -14,6 +14,8 @@
 #include "../core/Guard.hpp"
 #include "../core/Json.hpp"
 
+#include <string>
+
 namespace OpenRCT2
 {
     void AudioObject::Load()

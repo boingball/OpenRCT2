@@ -242,7 +242,21 @@ namespace OpenRCT2::Ui::Windows
 
             // Draw the rest of the text
             TextPaint tp{ colours[1], TextAlignment::centre };
-            auto textCoords = windowPos + ScreenCoordsXY((width / 2) - 1, 240);
+            int32_t restTop = 240;
+#ifdef __amigaos__
+            // What this port is running on, in the band between the logo and the credits. It is the first
+            // thing to ask for in a bug report, so it is on screen rather than only in a trace.
+            {
+                const auto textWidth = kWindowSize.width - (kPadding * 2);
+                auto amigaCoords = windowPos + ScreenCoordsXY((width / 2) - 1, 222);
+                drawTextWrapped(
+                    rt, amigaCoords, textWidth, "AmigaOS 68k port by Thomas L\u00fcbker, developed with Claude Code", tp);
+                amigaCoords.y += 11;
+                drawTextWrapped(rt, amigaCoords, textWidth, "RTG screen, AHI sound  --  GPLv3, like OpenRCT2 itself", tp);
+                restTop = 266;
+            }
+#endif
+            auto textCoords = windowPos + ScreenCoordsXY((width / 2) - 1, restTop);
             auto textWidth = kWindowSize.width - (kPadding * 2);
             for (auto stringId : _OpenRCT2InfoStrings)
                 textCoords.y += drawTextWrapped(rt, textCoords, textWidth, stringId, tp) + 5;

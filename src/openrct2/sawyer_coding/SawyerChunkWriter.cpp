@@ -56,6 +56,7 @@ namespace OpenRCT2::SawyerCoding
         checksum -= 0x1D4C1;
 
         _stream->Write(data.get(), dataLength);
-        _stream->WriteValue<uint32_t>(ToLittleEndian(checksum));
+        // WriteValue performs the little-endian conversion itself.
+        _stream->WriteValue<uint32_t>(checksum);
     }
 } // namespace OpenRCT2::SawyerCoding

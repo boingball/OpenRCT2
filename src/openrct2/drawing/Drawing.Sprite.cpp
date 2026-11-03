@@ -15,6 +15,7 @@
 #include "../PlatformEnvironment.h"
 #include "../SpriteIds.h"
 #include "../config/Config.h"
+#include "../core/Endianness.h"
 #include "../core/FileStream.h"
 #include "../core/Guard.hpp"
 #include "../core/MemoryStream.h"
@@ -27,9 +28,11 @@
 #include "RenderTarget.h"
 #include "ScrollingText.h"
 
+#include <bit>
 #include <cassert>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 using namespace OpenRCT2;
@@ -345,6 +348,18 @@ static void ReadAndConvertGxDat(IStream* stream, size_t count, bool is_rctc, G1E
 {
     auto g1Elements32 = std::make_unique<StoredG1Element[]>(count);
     stream->Read(g1Elements32.get(), count * sizeof(StoredG1Element));
+    if constexpr (std::endian::native == std::endian::big)
+    {
+        // little-endian on disk: one 32-bit field followed by six 16-bit fields
+        for (size_t i = 0; i < count; i++)
+        {
+            auto* bytes = reinterpret_cast<uint8_t*>(&g1Elements32[i]);
+            std::swap(bytes[0], bytes[3]);
+            std::swap(bytes[1], bytes[2]);
+            for (size_t o = 4; o < sizeof(StoredG1Element); o += 2)
+                std::swap(bytes[o], bytes[o + 1]);
+        }
+    }
     if (is_rctc)
     {
         // Process RCTC's g1.dat file
@@ -527,12 +542,12 @@ bool GfxLoadG1(const IPlatformEnvironment& env)
         }
         return true;
     }
-    catch (const std::exception&)
+    catch (const std::exception& e)
     {
         _g1.elements.clear();
         _g1.elements.shrink_to_fit();
 
-        LOG_FATAL("Unable to load g1 graphics");
+        LOG_FATAL("Unable to load g1 graphics: %s", e.what());
         if (!gOpenRCT2Headless)
         {
             auto& uiContext = GetContext()->GetUiContext();
@@ -782,10 +797,17 @@ static std::optional<PaletteMap> FASTCALL GfxDrawSpriteGetPalette(ImageId imageI
     return paletteMap;
 }
 
+#ifdef __amigaos__
+uint32_t gDrawSpriteStat[4] = {}; // sprite draw calls, sprites reaching the blitter, clipped pixel area, remapped/blended
+#endif
+
 void FASTCALL GfxDrawSpriteSoftware(RenderTarget& rt, const ImageId imageId, const ScreenCoordsXY& spriteCoords)
 {
     if (imageId.HasValue())
     {
+#ifdef __amigaos__
+        gDrawSpriteStat[0]++;
+#endif
         auto palette = GfxDrawSpriteGetPalette(imageId);
         if (!palette)
         {
@@ -982,6 +1004,12 @@ void FASTCALL GfxDrawSpritePaletteSetSoftware(
     dest_pointer += (zoomLevel.ApplyInversedTo(rt.WorldWidth()) + rt.pitch) * dest_start_y + dest_start_x;
 
     DrawSpriteArgs args(imageId, paletteMap, *g1, source_start_x, source_start_y, width, height, dest_pointer);
+#ifdef __amigaos__
+    gDrawSpriteStat[1]++;
+    gDrawSpriteStat[2] += static_cast<uint32_t>(width * height);
+    if (imageId.HasPrimary() || imageId.IsBlended())
+        gDrawSpriteStat[3]++;
+#endif
     GfxSpriteToBuffer(rt, args);
 }
 

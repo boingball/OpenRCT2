@@ -34,7 +34,13 @@ namespace OpenRCT2
         {
         private:
             Ui::IUiContext& _uiContext;
+#ifdef OPENRCT2_SMALL_MEMORY
+            // Each session embeds 1024 paint entries. Allocate two at a time
+            // instead of demanding a multi-megabyte contiguous block for 32.
+            sfl::segmented_vector<PaintSession, 2> _paintSessionPool;
+#else
             sfl::segmented_vector<PaintSession, 32> _paintSessionPool;
+#endif
             std::vector<PaintSession*> _freePaintSessions;
             time_t _lastSecond = 0;
             int32_t _currentFPS = 0;

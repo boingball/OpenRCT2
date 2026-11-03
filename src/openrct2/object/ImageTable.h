@@ -27,6 +27,9 @@ namespace OpenRCT2
     private:
         std::unique_ptr<uint8_t[]> _data;
         std::vector<G1Element> _entries;
+        // Entries referring to the immutable, process-lifetime G1 sprite bank.
+        // Headers remain private (including object-specific offsets and zoom links).
+        std::vector<uint32_t> _borrowedEntries;
 
         /**
          * Container for a G1 image, additional information and RAII. Used by ReadJson
@@ -68,6 +71,8 @@ namespace OpenRCT2
             return static_cast<uint32_t>(_entries.size());
         }
         void AddImage(const G1Element* g1);
+        // Appends g1 and takes over its pixel buffer (g1.offset becomes null): no second copy of the image data.
+        void TakeImage(G1Element& g1);
         void addPalette(const G1Palette& g1);
     };
 } // namespace OpenRCT2

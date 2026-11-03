@@ -15,7 +15,12 @@
 #include "drawing/BitmapReader.h"
 
 #include <memory>
+#ifdef __amigaos__
+    #include "platform/amiga/amiga_ui.h"
+    #include <cstdio>
+#endif
 #include <openrct2/Context.h>
+#include <openrct2/platform/AmigaTrace.h>
 #include <openrct2/Diagnostic.h>
 #include <openrct2/OpenRCT2.h>
 #include <openrct2/PlatformEnvironment.h>
@@ -53,6 +58,29 @@ int main(int argc, const char** argv)
     });
 #endif
     int32_t rc = EXIT_SUCCESS;
+#ifdef __amigaos__
+    // An uncaught exception ends in abort() ("failed return code 127" from the launcher, screen left open);
+    // record what it was first.
+    std::set_terminate([]() {
+        std::string what = "unknown";
+        try
+        {
+            if (auto e = std::current_exception())
+                std::rethrow_exception(e);
+        }
+        catch (const std::exception& e)
+        {
+            what = e.what();
+        }
+        catch (...)
+        {
+        }
+        AMIGA_TRACE((std::string("terminate: uncaught exception: ") + what).c_str());
+        std::abort();
+    });
+    try
+    {
+#endif
     auto runGame = CommandLineRun(argv, argc);
     RegisterBitmapReader();
     if (runGame == OpenRCT2::CommandLine::ExitCode::launch)
@@ -81,11 +109,25 @@ int main(int argc, const char** argv)
             context = CreateContext(std::move(env), std::move(audioContext), std::move(uiContext));
         }
         rc = context->RunOpenRCT2(argc, argv);
+        AMIGA_TRACE("main: game loop finished, shutting the context down");
     }
     else if (runGame == OpenRCT2::CommandLine::ExitCode::fail)
     {
         rc = EXIT_FAILURE;
     }
+    AMIGA_TRACE("main: context shut down, exiting");
+#ifdef __amigaos__
+    }
+    catch (const std::exception& e)
+    {
+        // A failed screen/window open must unwind normally and return to the
+        // launcher, rather than entering the runtime abort requester.
+        AMIGA_TRACE(e.what());
+        std::fprintf(stderr, "OpenRCT2: %s\n", e.what());
+        amiga_ui_close();
+        return 20;
+    }
+#endif
     return rc;
 }
 

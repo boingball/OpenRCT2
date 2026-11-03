@@ -9,6 +9,7 @@
 #include <openrct2/PlatformEnvironment.h>
 #include <openrct2/audio/AudioContext.h>
 #include <openrct2/config/Config.h>
+#include <openrct2/core/Path.hpp>
 #include <openrct2/entity/EntityRegistry.h>
 #include <openrct2/ride/RideManager.hpp>
 #include <openrct2/ui/UiContext.h>
@@ -25,6 +26,9 @@
     #include <sys/resource.h>
 #endif
 
+#ifdef __amigaos__
+extern "C" void amiga_malloc_stats(unsigned long*, unsigned long*);
+#endif
 using namespace OpenRCT2;
 
 // Network checksums are intentionally stubbed in DISABLE_NETWORK builds.
@@ -45,7 +49,7 @@ static uint32_t fingerprint(GameState_t& state)
     for (uint32_t i = 0; i < kMaxEntities; i++)
     {
         const auto* entity = state.entities.tryGetEntity(EntityId::FromUnderlying(static_cast<uint16_t>(i)));
-        if (entity->type == EntityType::null) continue;
+        if (entity == nullptr || entity->type == EntityType::null) continue;
         mix(i); mix(static_cast<uint32_t>(entity->type));
         mix(static_cast<uint32_t>(entity->x)); mix(static_cast<uint32_t>(entity->y)); mix(static_cast<uint32_t>(entity->z));
         mix(entity->orientation);
@@ -78,9 +82,17 @@ int main(int argc, char** argv)
     try
     {
         // Use an explicit, disposable directory. Never load or overwrite the user's normal configuration/saves.
+#ifdef __amigaos__
+        // libstdc++ filesystem treats Amiga volume names as relative Unix paths.
+        const auto dataPath = std::string(argv[3]);
+        const auto userPath = std::string(argv[4]);
+        if (!Path::DirectoryExists(userPath) && !Path::CreateDirectory(userPath))
+            throw std::runtime_error("Cannot create private benchmark directory");
+#else
         const auto dataPath = std::filesystem::absolute(argv[3]).string();
         const auto userPath = std::filesystem::absolute(argv[4]).string();
         std::filesystem::create_directories(userPath);
+#endif
         gOpenRCT2Headless = true;
         gOpenRCT2NoGraphics = true;
         gOpenRCT2SilentBreakpad = true;
@@ -136,6 +148,13 @@ int main(int argc, char** argv)
             total, total * 1000.0 / ticks, percentile(50), percentile(95), durations.back());
         std::printf("State fingerprint before: %08x\nState fingerprint after: %08x\n", initialChecksum, fingerprint(state));
         std::puts("Fingerprint covers selected canonical fields; it is not the multiplayer checksum.");
+#ifdef __amigaos__
+        unsigned long footprint = 0, inUse = 0;
+        amiga_malloc_stats(&footprint, &inUse);
+        std::printf("Allocator footprint bytes: %lu\nAllocator in-use bytes: %lu\n", footprint, inUse);
+        std::printf("Entity chunks: %zu\nRide chunks: %zu\n", state.entities.allocatedChunks(), state.rides.allocatedChunks());
+        std::puts("Allocator figures exclude executable segments, stacks and graphics-driver allocations.");
+#endif
 #if defined(__linux__)
         rusage usage{};
         if (getrusage(RUSAGE_SELF, &usage) == 0)
