@@ -34,6 +34,9 @@ cp "$HERE/OpenRCT2-launcher.info" "$D/OpenRCT2.info"
 cp "$HERE/OpenRCT2-drawer.info" "$OUT/OpenRCT2.info"
 cp "$HERE/README.txt" "$HERE/README.txt.info" "$D/"
 cp "$HERE/user/config.ini" "$D/user/config.ini"
+# The game shows doc/changelog.txt after an update (PROGDIR:doc/).
+mkdir -p "$D/doc"
+cp "$HERE/../changelog.txt" "$HERE/../../contributors.md" "$HERE/../../licence.txt" "$D/doc/"
 # The Amiga title sequence: a zip holding script.txt, selected in config.ini by its name "Amiga".
 mkdir -p "$D/data/sequence"
 rm -f "$D/data/sequence/Amiga.parkseq"
