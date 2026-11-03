@@ -85,6 +85,52 @@ static void test_g1(void) {
     put32(file+8,0xffffffffu); assert(!g1_sprite(&g,0,&s));
 }
 
+static void test_guest_sprites(void) {
+    uint8_t file[256]={0},matrix[35],guarded[16+16*16+16],before[sizeof(guarded)],expected[256];
+    const uint8_t black[12]={10,10,10,10,10,11,12,13,14,15,16,17};
+    const uint8_t grey[12]={10,11,12,13,14,15,16,17,18,19,20,21};
+    G1 g;Canvas c={guarded+16,16,16,2,14};unsigned format,zoom,colours,i;
+    int x,y;
+    for(i=0;i<35;i++){static const uint8_t ramp[]={0,243,244,202,213,100,254};matrix[i]=ramp[(i+i/7)%7];}
+    for(format=0;format<2;format++) {
+        unsigned n=24,row;
+        memset(file,0,sizeof(file));put32(file,1);put16(file+12,7);put16(file+14,5);
+        put16(file+16,(uint16_t)-3);put16(file+18,(uint16_t)-2);put16(file+20,format?4:1);
+        if(!format){memcpy(file+n,matrix,35);n+=35;}
+        else {
+            n+=10;
+            for(row=0;row<5;row++) {
+                unsigned column,last=n;put16(file+24+row*2,n-24);
+                for(column=0;column<7;column++)if(matrix[row*7+column]) {
+                    last=n;file[n++]=1;file[n++]=(uint8_t)column;file[n++]=matrix[row*7+column];
+                }
+                file[last]|=128;
+            }
+        }
+        put32(file+4,n-24);assert(g1_open(&g,file,n));
+        for(zoom=0;zoom<4;zoom++)for(colours=0;colours<2;colours++)for(y=-6;y<20;y++)for(x=-6;x<20;x++) {
+            int scale=1<<zoom;const uint8_t *shirt=colours?grey:black,*trousers=colours?black:grey;
+            memset(guarded,0xa5,sizeof(guarded));memset(c.pixels,19,256);memset(expected,19,256);
+            for(i=0;i<35;i++) {
+                int sx=-3+(int)(i%7),sy=-2+(int)(i/7),dx,dy;uint8_t pixel=matrix[i];
+                if(!pixel || sx%scale || sy%scale)continue;
+                dx=x+sx/scale;dy=y+sy/scale;
+                if(dx<0||dx>=16||dy<2||dy>=14)continue;
+                if(pixel>=243)pixel=shirt[pixel-243];else if(pixel>=202&&pixel<=213)pixel=trousers[pixel-202];
+                expected[dy*16+dx]=pixel;
+            }
+            assert(g1_draw_guest(&g,0,&c,x,y,zoom,colours,1-colours));assert(!memcmp(c.pixels,expected,256));
+            for(i=0;i<16;i++)assert(guarded[i]==0xa5&&guarded[272+i]==0xa5);
+        }
+        memcpy(before,guarded,sizeof(before));
+        assert(!g1_draw_guest(&g,0,&c,3,3,4,0,0));assert(!g1_draw_guest(&g,0,&c,3,3,0,32,0));
+        if(format) {file[n-3]=127;assert(!g1_draw_guest(&g,0,&c,3,3,3,0,0));}
+        else {put16(file+12,65);assert(!g1_draw_guest(&g,0,&c,3,3,0,0,0));}
+        assert(!memcmp(before,guarded,sizeof(before)));
+    }
+    puts("Guest bitmap/RLE dual clothing remap/zoom/clipping/atomic rejection: PASS");
+}
+
 static void test_palette(void) {
     uint8_t *file=calloc(1,8+1533*16+6); G1 g; uint32_t pal[256]; uint8_t *e=file+8+1532*16;
     assert(file); put32(file,1533); put32(file+4,6);
@@ -101,6 +147,7 @@ static void test_options(void) {
     assert(!options_parse(&o,"MODEID=0xGG",11)); assert(!options_parse(&o,"G1=\"broken",10));
     assert(!options_parse(&o,"UNKNOWN",7)); assert(!options_parse(&o,"MODEID=123456789",16));
     assert(!options_parse(&o,"G1=",3));
+    assert(options_parse(&o,"MARKERS",7)&&o.markers);
 }
 static void test_upstream_fixture(void) {
     static uint8_t file[9000], pixels[128*128];
@@ -149,10 +196,147 @@ static uint32_t test_scene(int w,int h) {
     hash=checksum(a,bytes);
     free(a);free(b);free(backa);free(backb);free(old);return hash;
 }
+static void putle(uint8_t *p,uint32_t n){p[0]=(uint8_t)n;p[1]=(uint8_t)(n>>8);p[2]=(uint8_t)(n>>16);p[3]=(uint8_t)(n>>24);}
+static void map_hash(uint8_t *p,unsigned size){unsigned i;uint32_t h=2166136261u;for(i=32;i<size;i++)h=(h^p[i])*16777619u;putle(p+20,h);}
+static void test_park_map(void) {
+    uint8_t blob[32+26*4+26*8]={0},bad[sizeof(blob)];
+    static uint8_t a[640*480],b[640*480],ba[640*480],bb[640*480],old[640*480];
+    static Runner r,reference;
+    ParkMap parsed;
+    unsigned cell,n=0,k,res;
+    memcpy(blob,"AMAP",4);blob[4]=1;blob[6]=5;putle(blob+8,25);putle(blob+12,26);putle(blob+16,0x12345678);
+    for(cell=0;cell<25;cell++) {
+        uint8_t *record;
+        putle(blob+32+cell*4,n);
+        record=blob+32+26*4+n++*8;record[1]=2;
+        if(cell==1)record[1]=4;
+        if(cell==2)record[3]=0x10;
+        if(cell==3)record[5]=8;
+        if(cell==12){record=blob+32+26*4+n++*8;record[0]=1;record[1]=2;record[3]=0xff;record[4]=4;}
+    }
+    putle(blob+32+25*4,n);map_hash(blob,sizeof(blob));
+    assert(park_map_open(&parsed,blob,sizeof(blob))&&parsed.side==5&&parsed.elements==26);
+    assert(!park_map_open(&parsed,NULL,sizeof(blob))&&!park_map_open(&parsed,blob,sizeof(blob)-1));
+    for(k=0;k<7;k++) {
+        memcpy(bad,blob,sizeof(blob));
+        switch(k){case 0:bad[0]='X';break;case 1:bad[4]=4;break;case 2:bad[6]=0;break;
+        case 3:putle(bad+32+4,999);break;case 4:bad[32+26*4]=9;break;
+        case 5:bad[32+26*4+3]=0xff;break;default:bad[32+26*4+2]=0x80;break;}
+        map_hash(bad,sizeof(bad));assert(!park_map_open(&parsed,bad,sizeof(bad)));
+    }
+    memcpy(bad,blob,sizeof(blob));bad[sizeof(bad)-1]^=1;assert(!park_map_open(&parsed,bad,sizeof(bad)));
+    for(res=0;res<2;res++) {
+        int w=res?320:640,h=res?240:480;unsigned frame;size_t bytes=(size_t)w*h;
+        runner_init(&r,a,ba,w,h);runner_init(&reference,b,bb,w,h);
+        assert(runner_set_map(&r,blob,sizeof(blob))&&runner_set_map(&reference,blob,sizeof(blob)));
+        for(frame=0;frame<50;frame++) {
+            int key=KEY_NONE;
+            if(frame%5==0)key=KEY_PREV;if(frame%7==0)key=KEY_NEXT;
+            if(frame%11==0)key=KEY_HOME;if(frame%3==0)key=KEY_GRID;
+            if(frame==10){r.pan_x=reference.pan_x=-9000;r.pan_y=reference.pan_y=6000;key=KEY_LEFT;}
+            if(frame==20){r.pan_x=reference.pan_x=9000;r.pan_y=reference.pan_y=-6000;key=KEY_RIGHT;}
+            if(frame==30)key=KEY_HOME;
+            runner_input(&r,key);runner_input(&reference,key);runner_input(&r,KEY_MORE);
+            memcpy(old,a,bytes);runner_render(&r);reference.full_redraw=1;runner_render(&reference);
+            assert(!memcmp(a,b,bytes)&&r.guests==0);
+            for(k=0;k<bytes;k++)if(old[k]!=a[k])assert(r.dirty[((k/w)/TILE_H)*(w/TILE_W)+(k%w)/TILE_W]);
+            memset(r.dirty,0,sizeof(r.dirty));
+        }
+        /* Avoid the cross libc's decimal formatter: its _itoa_word uses a
+         * 68020 64-bit multiply, unavailable on a bare 68060. */
+        printf("Imported map parsing/zoom/pan/clipping/dirty rectangles: PASS %s %08lx\n",res?"320x240":"640x480",(unsigned long)checksum(a,bytes));
+    }
+}
+static void test_saved_guests(void) {
+    enum { BASE=32+26*4+25*8, SIZE=BASE+2*PARK_MAP_GUEST_RECORD };
+    uint8_t map[SIZE]={0},bad[SIZE];
+    static uint8_t pixels[640*480],back[640*480],without[640*480],terrain_back[640*480];
+    static Runner r,terrain;
+    ParkMap parsed;
+    unsigned i;
+    memcpy(map,"AMAP",4);map[4]=2;map[6]=5;putle(map+8,25);putle(map+12,25);putle(map+24,2);
+    for(i=0;i<=25;i++)putle(map+32+i*4,i);
+    for(i=0;i<25;i++)map[32+26*4+i*8+1]=2;
+    // Two depth-ordered saved positions; the second is on a ride and hidden.
+    for(i=0;i<2;i++) {
+        uint8_t *g=map+BASE+i*PARK_MAP_GUEST_RECORD;
+        put16(g,i+1);put16(g+2,80+i*32);put16(g+4,80+i*32);put16(g+6,16);
+        g[8]=8;g[9]=i?3:5;g[11]=21;g[12]=7;g[13]=15;
+    }
+    map_hash(map,SIZE);assert(park_map_open(&parsed,map,SIZE)&&parsed.guest_count==2);
+    for(i=0;i<9;i++) {
+        memcpy(bad,map,SIZE);
+        switch(i) {
+            case 0:putle(bad+24,10001);break;
+            case 1:put16(bad+BASE+16,1);break;
+            case 2:put16(bad+BASE+6,65535);break;
+            case 3:put16(bad+BASE+2,160);break;
+            case 4:put16(bad+BASE+16+2,0);put16(bad+BASE+16+4,0);break;
+            case 5:bad[BASE+9]=24;break;
+            case 6:bad[BASE+10]=2;break;
+            case 7:bad[BASE+15]=1;break;
+            default:bad[BASE+11]=32;break;
+        }
+        map_hash(bad,SIZE);assert(!park_map_open(&parsed,bad,SIZE));
+    }
+    runner_init(&r,pixels,back,640,480);assert(runner_set_map(&r,map,SIZE));runner_render(&r);
+    assert(pixels[234*640+320]==3); // exact saved-position marker head
+    assert(pixels[250*640+320]!=3); // on-ride position is not drawn as a walker
+    memcpy(without,pixels,sizeof(pixels));r.phase+=137;r.full_redraw=1;runner_render(&r);
+    assert(!memcmp(pixels,without,sizeof(pixels))); // no invented movement/animation
+    runner_input(&r,KEY_PAUSE);runner_render(&r);assert(!r.map_guests_visible&&pixels[234*640+320]!=3);
+    // Hiding snapshots exactly restores the v1 terrain viewport.
+    map[4]=1;putle(map+24,0);map_hash(map,BASE);
+    runner_init(&terrain,without,terrain_back,640,480);assert(runner_set_map(&terrain,map,BASE));runner_render(&terrain);
+    assert(!memcmp(pixels+48*640,without+48*640,(480-96)*640));
+    runner_input(&r,KEY_PAUSE);runner_render(&r);assert(pixels[234*640+320]==3);
+    puts("Saved guest bounds/order/identity/state/toggle/static-position checks: PASS");
+}
+static void test_saved_rides(void) {
+    enum { BASE=32+26*4, SIZE=BASE+28*8+2*PARK_MAP_RIDE_RECORD };
+    uint8_t map[SIZE]={0},bad[SIZE];
+    static uint8_t pixels[640*480],back[640*480],snapshot[640*480];static Runner r;
+    ParkMap parsed;unsigned cell,n=0,i;
+    memcpy(map,"AMAP",4);map[4]=3;map[6]=5;putle(map+8,25);putle(map+12,28);putle(map+28,2);
+    for(cell=0;cell<25;cell++) {
+        uint8_t *p;putle(map+32+cell*4,n);p=map+BASE+n++*8;p[1]=2;
+        if(cell==12||cell==18||cell==24){p=map+BASE+n++*8;p[0]=2;p[1]=2;p[3]=2;p[4]=cell==12?1:0;p[7]=cell==12?2:cell==18?7:255;}
+    }
+    putle(map+32+25*4,n);
+    memcpy(map+BASE+28*8,(uint8_t[]){2,4,9,1,2,2,2,1,7,43,9,2,4,3,3,0},16);
+    map_hash(map,SIZE);assert(park_map_open(&parsed,map,SIZE)&&parsed.ride_count==2&&parsed.track_count==3);
+    for(i=0;i<8;i++) {
+        memcpy(bad,map,SIZE);
+        switch(i) {
+            case 0:putle(bad+28,256);break;
+            case 1:bad[BASE+28*8+8]=2;break;
+            case 2:bad[BASE+28*8+1]=255;break;
+            case 3:bad[BASE+28*8+3]=4;break;
+            case 4:bad[BASE+28*8+7]=5;break;
+            case 5:bad[BASE+13*8+7]=6;break; // unresolved track ride
+            case 6:bad[BASE+13*8+3]=4;break; // bad direction
+            default:bad[4]=2;putle(bad+28,0);break;
+        }
+        map_hash(bad,SIZE);assert(!park_map_open(&parsed,bad,SIZE));
+    }
+    runner_init(&r,pixels,back,640,480);assert(runner_set_map(&r,map,SIZE));runner_render(&r);
+    assert(pixels[232*640+320]==5); // exact saved track tile outline, all rides
+    memcpy(snapshot,pixels,sizeof(pixels));
+    runner_input(&r,KEY_MORE);runner_render(&r);
+    assert(r.map_ride_selected==0&&pixels[232*640+320]==4); // selected ride 2, gold
+    runner_input(&r,KEY_MORE);runner_render(&r);assert(r.map_ride_selected==1); // sparse ride ID 7
+    runner_input(&r,KEY_MORE);runner_input(&r,KEY_HOME);runner_render(&r);
+    assert(r.map_ride_selected==-1&&!memcmp(snapshot,pixels,sizeof(pixels)));
+    runner_input(&r,KEY_LESS);assert(r.map_ride_selected==1);runner_input(&r,KEY_MORE);runner_input(&r,KEY_HOME);
+    runner_input(&r,KEY_VIEW);runner_render(&r);assert(!r.map_tracks_visible&&pixels[232*640+320]!=5);
+    runner_input(&r,KEY_VIEW);runner_render(&r);assert(!memcmp(snapshot,pixels,sizeof(pixels)));
+    puts("Ride catalogue/reference/direction/selection/track-toggle checks: PASS");
+}
 int main(void) {
     uint32_t a,b;
-    test_g1(); test_palette(); test_options(); test_upstream_fixture();
+    test_g1(); test_guest_sprites(); test_palette(); test_options(); test_upstream_fixture();
     a=test_scene(640,480); b=test_scene(320,240);
+    test_park_map(); test_saved_guests(); test_saved_rides();
     printf("G1 clipping/malformed files/palettes/options/dirty redraw: PASS\n640x480 %08lx 320x240 %08lx\n",(unsigned long)a,(unsigned long)b);
     return 0;
 }

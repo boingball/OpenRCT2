@@ -1816,48 +1816,6 @@ namespace OpenRCT2
         return objMgr.GetLoadedObject<FootpathRailingsObject>(entryIndex);
     }
 
-    RideId PathElement::getRideIndex() const
-    {
-        return rideIndex;
-    }
-
-    void PathElement::setRideIndex(RideId newRideIndex)
-    {
-        rideIndex = newRideIndex;
-    }
-
-    uint8_t PathElement::getAdditionStatus() const
-    {
-        return additionStatus;
-    }
-
-    void PathElement::setAdditionStatus(uint8_t newStatus)
-    {
-        additionStatus = newStatus;
-    }
-
-    uint8_t PathElement::getEdges() const
-    {
-        return edgesAndCorners & FOOTPATH_PROPERTIES_EDGES_EDGES_MASK;
-    }
-
-    void PathElement::setEdges(uint8_t newEdges)
-    {
-        edgesAndCorners &= ~FOOTPATH_PROPERTIES_EDGES_EDGES_MASK;
-        edgesAndCorners |= (newEdges & FOOTPATH_PROPERTIES_EDGES_EDGES_MASK);
-    }
-
-    uint8_t PathElement::getCorners() const
-    {
-        return edgesAndCorners >> 4;
-    }
-
-    void PathElement::setCorners(uint8_t newCorners)
-    {
-        edgesAndCorners &= ~FOOTPATH_PROPERTIES_EDGES_CORNERS_MASK;
-        edgesAndCorners |= (newCorners << 4);
-    }
-
     uint8_t PathElement::getEdgesAndCorners() const
     {
         return edgesAndCorners;

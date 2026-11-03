@@ -1,4 +1,107 @@
-# OpenRCT2 Amiga graphics runner 0.1
+# OpenRCT2 Amiga imported park viewer 0.11
+
+Targets 68060, 64 MB Fast RAM, AmigaOS 3.1+ and an 8-bit P96/CyberGraphX RTG
+mode. This milestone displays **real imported terrain/path data**, with
+simplified geometry and colours. It displays saved track footprints and static guest markers. It does not
+simulate the park or load ride/scenery graphics.
+
+The 0.11 download includes pre-exported maps, so no G1 data or conversion step
+is needed to try the viewer. In its drawer, run:
+
+```text
+Protect OpenRCT2ParkView +e
+OpenRCT2ParkView MAP=TestPark.amap
+OpenRCT2ParkView MAP=BusyPark.amap LOW
+```
+
+Use cursor keys to pan, `[` to zoom out, `]` to zoom in, Home/H to centre,
+G for the terrain grid, Space to toggle guest markers, and Escape to quit.
+Use `+`/`-` to cycle rides and focus/highlight their track footprint; Tab toggles
+track outlines. The bottom row shows legacy ride ID/type/status/station count. B starts a ten-second benchmark;
+in map view it forces a complete map redraw each frame and measures that plus
+RTG copy and frame wait. Normal stationary map viewing caches the background.
+Results use the existing `OpenRCT2Runner.bench` filename. This is a graphics
+benchmark, with no simulation cost included.
+
+For another classic SV6 save, use a writable drawer:
+
+```text
+OpenRCT2ImportProbe MyPark.sv6
+OpenRCT2ParkView MAP=ImportedMap.amap
+```
+
+The importer writes its report, an overview PPM and the portable `.amap` file.
+It reads the source save without modifying it. Terrain, paths and selected metadata enter an isolated partial GameState;
+guest positions are separate view-only snapshots, not active engine entities. SC6, modern `.park` and extended Classic saves are not
+supported. Files with invalid checksums, bounds or tile chains are rejected.
+The viewer independently validates the AMAP structure and checksum before
+opening its display; [MAP_FORMAT.md](MAP_FORMAT.md) documents the format.
+
+The map uses diagnostic terrain, water and queue colours. Static gold markers
+show saved guest positions, with cyan markers for outside-park guests; riding
+and picked-up guests are hidden. BusyPark includes 2,189 valid snapshots.
+Unplaced/off-map or invalid records are skipped and counted by the importer.
+The saved guest counter can differ from this snapshot count. Markers do not
+move or simulate AI, and clothing/animation metadata is not rendered yet.
+AMAP v1 terrain-only and v2 guest-snapshot maps remain supported.
+AMAP v3 adds track footprints and a ride catalogue: BusyPark has 134 rides and
+9,175 track records; TestPark has one ride and 49 track records. Cyan outlines
+show occupied track tiles at saved base heights; the selected ride is gold,
+and station track types have white markers. These are diagnostic footprints,
+not coaster rail geometry or original ride graphics. Numeric types/object
+slots are retained without loading or resolving ride assets/names. Invalid
+ride snapshots and unresolved references are skipped and reported. Water/terrain and
+path connections are approximate rendering, not OpenRCT2's full painter or
+object manager. Optional original RCT2 G1 data provides the existing sprite
+browser and flat grass sprite at original zoom. No original game assets are
+bundled. The previous graphics demo remains available by omitting `MAP=`.
+
+Verification covers host ASan/UBSan, bare 68060 parser/render tests, HUNK
+startup/OS ABI/RTG copy and allocation/file cleanup through mocked libraries.
+The captured native map viewport matches host preview pixels at both sizes.
+The mock is not P96/CGX: this build still needs real WinUAE/Amiga validation.
+No native map frame rate is claimed.
+
+## Optional original guest sprites (0.11)
+
+To replace supported normal guest markers with original RCT2 graphics, provide
+your own original 29,294-entry G1.DAT (not RCT Classic):
+
+```text
+OpenRCT2ParkView MAP=BusyPark.amap G1="Work:RCT2/Data/g1.dat"
+```
+
+No game artwork is included. The normal animation group (0) in walking,
+queuing, entering-park and leaving-park states uses a fixed neutral walking
+frame, facing the saved direction. Shirt and trouser colours use the engine's
+legacy 32-colour remap tables. This is still a static snapshot, not the exact
+saved animation frame, action pose or guest AI. Other groups/poses and missing
+or invalid sprites retain diagnostic markers; on-ride/picked guests stay hidden.
+`MARKERS` forces markers even with G1 loaded. Space hides/shows all guests.
+
+The new guest path supports validated bitmap/RLE sprites, clipped and sampled
+at all four zoom levels. It uses both remap ramps without changing the original
+demo's single-remap renderer. Every source row is checked before writing,
+including rows skipped by zoom; malformed sprites cannot leave partial pixels.
+The cached map painter still has approximate cell-based occlusion.
+
+The clothing tables are generated from this repository's palette PNGs with
+`python3 tools/guest_palette.py`; `--check` verifies all 32 tables. Host
+ASan/UBSan and bare 68060 tests compare bitmap/RLE output against independent
+expanded-pixel references, covering zoom, clipping, black as a real clothing
+colour, two remaps and malformed input. The actual HUNK's G1 load/render/free
+path and viewport pixels match the host with synthetic fixture artwork at
+both display sizes. The fixture contains no original game art. The previous
+native G1 demo worked in the user's WinUAE test, but this new sprite path has
+not yet been checked against an original G1 file or real WinUAE/P96/CGX.
+
+The included importer is unchanged at 0.10; no new save format is introduced.
+V1/v2/v3 AMAP files remain supported. Original ride/scenery graphics and native
+park simulation remain absent.
+
+## Original graphics demo
+
+# Graphics runner 0.1
 
 First native executable for investigating a classic Amiga port. Targets a
 68060, 64 MB or more Fast RAM, AmigaOS 3.1+, and an RTG graphics card using

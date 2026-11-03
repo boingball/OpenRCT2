@@ -1,4 +1,12 @@
 file(GLOB_RECURSE OPENRCT2_CORE_SOURCES "${CMAKE_CURRENT_LIST_DIR}/*.cpp")
+if (AMIGA)
+    file(GLOB OPENRCT2_AMIGA_C_SOURCES "${CMAKE_CURRENT_LIST_DIR}/platform/*.c")
+    list(APPEND OPENRCT2_CORE_SOURCES ${OPENRCT2_AMIGA_C_SOURCES})
+    # Doug Lea's malloc replaces libnix's flat-list allocator (see platform/amiga_malloc.c); its source is not ours to lint.
+    set_source_files_properties("${CMAKE_CURRENT_LIST_DIR}/platform/amiga_malloc.c" PROPERTIES COMPILE_FLAGS "-w")
+    # GCC 16 false positive in RideUpdateFavouritedStat / ResetAllRideBuildDates
+    set_source_files_properties("${CMAKE_CURRENT_LIST_DIR}/ride/Ride.cpp" PROPERTIES COMPILE_FLAGS "-Wno-null-dereference")
+endif ()
 file(GLOB_RECURSE OPENRCT2_CORE_HEADERS "${CMAKE_CURRENT_LIST_DIR}/*.h"
         "${CMAKE_CURRENT_LIST_DIR}/*.hpp")
 
@@ -24,12 +32,39 @@ endif ()
 # It should be possible to expose relevant types with visibility default attribute, but we can make the whole issue go away by
 # linking the library and executable statically. There is no openrct2-cli in macOS package, so no code gets duplicated.
 # https://github.com/OpenRCT2/OpenRCT2/issues/24936
+# GCC 13's inlined picosha2 finish() analysis loses its block-size invariant.
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "14")
+    set_source_files_properties("${CMAKE_CURRENT_LIST_DIR}/rct12/ScenarioPatcher.cpp"
+        PROPERTIES COMPILE_FLAGS "-Wno-stringop-overflow")
+endif ()
 set(LIBOPENRCT2_LINKAGE)
 if (APPLE)
     set(LIBOPENRCT2_LINKAGE STATIC)
 endif()
 add_library(libopenrct2 ${LIBOPENRCT2_LINKAGE} ${OPENRCT2_QUICKJS_NG_SOURCES} ${OPENRCT2_CORE_SOURCES} ${OPENRCT2_CORE_MM_SOURCES})
 add_library(OpenRCT2::libopenrct2 ALIAS libopenrct2)
+if (AMIGA)
+    if (OPENRCT2_AMIGA_THREADS)
+        target_compile_definitions(libopenrct2 PRIVATE OPENRCT2_AMIGA_THREADS)
+    endif ()
+    target_link_options(libopenrct2 INTERFACE "-Wl,--wrap=pthread_create")
+    if (OPENRCT2_AMIGA_OPEN4_RUNTIME)
+        target_sources(libopenrct2 PRIVATE
+            "${PROJECT_SOURCE_DIR}/amiga/core/pthread_format.cpp"
+            "${PROJECT_SOURCE_DIR}/amiga/core/soft_float_math.cpp"
+            "${PROJECT_SOURCE_DIR}/amiga/core/amiga_atomics.cpp")
+        target_link_options(libopenrct2 INTERFACE "-Wl,--wrap=snprintf"
+            "-Wl,-u,___wrap_snprintf" "-Wl,-u,___wrap_pthread_create"
+            "-Wl,-u,__ZN9__gnu_cxx18__exchange_and_addEPVii")
+        target_link_options(libopenrct2 INTERFACE
+            "-Wl,--wrap=floorf" "-Wl,--wrap=ceilf" "-Wl,--wrap=sqrtf"
+            "-Wl,-u,___wrap_floorf" "-Wl,-u,___wrap_ceilf" "-Wl,-u,___wrap_sqrtf")
+    endif ()
+    # amiga_compat.cpp lives in this archive but is only needed by libstdc++, which the
+    # linker scans later: force the two symbols in so the member is pulled.
+    target_link_options(libopenrct2 INTERFACE "-Wl,-u,___xpg_strerror_r" "-Wl,-u,__Z7statvfsPKcP7statvfs"
+        "-Wl,-u,__ZNSt6chrono3_V212steady_clock3nowEv" "-Wl,-u,__ZNSt6chrono12system_clock3nowEv")
+endif ()
 
 if (CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13")
     message(WARNING "Buggy GCC 12 detected! Disabling some warnings")
@@ -44,8 +79,20 @@ endif ()
 set_target_properties(libopenrct2 PROPERTIES PREFIX "")
 SET_CHECK_CXX_FLAGS(libopenrct2)
 
+if (AMIGA AND NOT DISABLE_NETWORK)
+    enable_language(ASM)
+    target_sources(libopenrct2 PRIVATE
+        "${ROOT_DIR}/src/thirdparty/amilan/amiga/socket.c"
+        "${ROOT_DIR}/src/thirdparty/amilan/src/protocol.c"
+        "${ROOT_DIR}/src/thirdparty/amilan/src/ipv4_text.c"
+        "${CMAKE_CURRENT_LIST_DIR}/platform/amiga_net_call.S")
+    target_include_directories(libopenrct2 PRIVATE "${ROOT_DIR}/src/thirdparty/amilan/include")
+    target_compile_definitions(libopenrct2 PRIVATE OPENRCT2_AMIGA_LAN_EXPERIMENT)
+endif ()
 if (NOT DISABLE_NETWORK OR NOT DISABLE_HTTP)
-    if (WIN32)
+    if (AMIGA)
+        # SDK OpenSSL calls use AmiSSL library vectors, opened lazily for RSA.
+    elseif (WIN32)
         target_link_libraries(libopenrct2 bcrypt)
     else ()
         if (APPLE AND NOT MACOS_USE_DEPENDENCIES)
@@ -193,7 +240,7 @@ if (EMSCRIPTEN)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s EXPORTED_FUNCTIONS=${EMSCRIPTEN_EXPORTED_FUNCTIONS} --js-library ${ROOT_DIR}/emscripten/deps.js")
 endif()
 
-if (NOT MINGW AND NOT MSVC AND NOT EMSCRIPTEN)
+if (NOT MINGW AND NOT MSVC AND NOT EMSCRIPTEN AND NOT AMIGA)
     if (APPLE AND NOT MACOS_USE_DEPENDENCIES)
         execute_process(COMMAND brew --prefix icu4c OUTPUT_VARIABLE HOMEBREW_PREFIX_ICU OUTPUT_STRIP_TRAILING_WHITESPACE)
         # Needed for linking with non-broken icu on Apple platforms
@@ -299,6 +346,7 @@ endif ()
 
 # Defines
 target_compile_definitions(libopenrct2 PUBLIC
+        $<$<BOOL:${OPENRCT2_SMALL_MEMORY}>:OPENRCT2_SMALL_MEMORY>
         $<$<BOOL:${USE_MMAP}>:USE_MMAP>
         $<$<BOOL:${DISABLE_NETWORK}>:DISABLE_NETWORK>
         $<$<BOOL:${DISABLE_HTTP}>:DISABLE_HTTP>

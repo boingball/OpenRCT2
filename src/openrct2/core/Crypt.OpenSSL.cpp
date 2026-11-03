@@ -21,6 +21,9 @@
     #include <vector>
 
 using namespace OpenRCT2::Crypt;
+#ifdef __amigaos__
+extern "C" int amiga_crypto_init(void);
+#endif
 
 static void OpenSSLThrowOnBadStatus(std::string_view name, int status)
 {
@@ -35,8 +38,11 @@ static void OpenSSLInitialise()
     static bool _opensslInitialised = false;
     if (!_opensslInitialised)
     {
-        _opensslInitialised = true;
+#ifdef __amigaos__
+        if (!amiga_crypto_init()) throw std::runtime_error("Networking requires AmiSSL v5 (OpenSSL 3 API)");
+#endif
         OpenSSL_add_all_algorithms();
+        _opensslInitialised = true;
     }
 }
 

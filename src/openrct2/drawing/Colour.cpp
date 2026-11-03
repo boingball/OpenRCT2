@@ -132,13 +132,4 @@ namespace OpenRCT2::Drawing
         return skipNonNormalColour((ticks / 32) % kColourNumNormal);
     }
 
-    Colour clampColour(uint8_t colour)
-    {
-        return static_cast<Colour>(std::clamp<uint8_t>(colour, 0, kColourNumTotal - 1));
-    }
-
-    Colour clampColour(Colour colour)
-    {
-        return clampColour(EnumValue(colour));
-    }
 } // namespace OpenRCT2::Drawing

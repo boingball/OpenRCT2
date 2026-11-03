@@ -13,6 +13,7 @@
 #include "../Diagnostic.h"
 #include "../OpenRCT2.h"
 #include "../PlatformEnvironment.h"
+#include "../platform/Platform.h"
 #include "../audio/Audio.h"
 #include "../core/Console.hpp"
 #include "../core/EnumMap.hpp"
@@ -276,13 +277,18 @@ namespace OpenRCT2::ObjectFactory
         return object;
     }
 
+    // Load-phase accumulators for the trace: objects, ms in file+RLE decode, ms in parsing, bytes decoded.
+    uint32_t gLoadStat[10] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }; // [6] json objects, [7] json read+parse ms, [8] json ReadJson ms (nested DAT decode excluded), [9] zip objects
+
     std::unique_ptr<Object> CreateObjectFromLegacyFile(const utf8* path, bool loadImages)
     {
         LOG_VERBOSE("CreateObjectFromLegacyFile(..., \"%s\")", path);
 
         std::unique_ptr<Object> result;
+        const uint32_t tEntry = Platform::GetTicks();
         try
         {
+            const uint32_t tOpen = tEntry;
             auto fs = FileStream(path, FileMode::open);
             auto chunkReader = SawyerChunkReader(&fs);
 
@@ -300,10 +306,15 @@ namespace OpenRCT2::ObjectFactory
 
                 auto chunk = chunkReader.ReadChunk();
                 LOG_VERBOSE("  size: %zu", chunk->GetLength());
+                const uint32_t tParse = Platform::GetTicks();
 
                 auto chunkStream = MemoryStream(chunk->GetData(), chunk->GetLength());
                 auto readContext = ReadObjectContext(objectName, loadImages, nullptr);
                 ReadObjectLegacy(*result, &readContext, &chunkStream);
+                gLoadStat[0]++;
+                gLoadStat[1] += tParse - tOpen;
+                gLoadStat[2] += Platform::GetTicks() - tParse;
+                gLoadStat[3] += static_cast<uint32_t>(chunk->GetLength());
                 if (readContext.WasError())
                 {
                     throw std::runtime_error("Object has errors");
@@ -315,6 +326,7 @@ namespace OpenRCT2::ObjectFactory
         {
             LOG_ERROR("Error: %s when processing object %s", e.what(), path);
         }
+        gLoadStat[4] += Platform::GetTicks() - tEntry;
         return result;
     }
 
@@ -457,6 +469,7 @@ namespace OpenRCT2::ObjectFactory
             }
 
             json_t jRoot = Json::FromVector(jsonBytes);
+            gLoadStat[9]++;
 
             if (jRoot.is_object())
             {
@@ -477,9 +490,16 @@ namespace OpenRCT2::ObjectFactory
 
         try
         {
+            const uint32_t t0 = Platform::GetTicks();
             json_t jRoot = Json::ReadFromFile(path.c_str());
+            const uint32_t t1 = Platform::GetTicks();
+            const uint32_t nestedBefore = gLoadStat[4];
             auto fileDataRetriever = FileSystemDataRetriever(Path::GetDirectory(path));
-            return CreateObjectFromJson(jRoot, &fileDataRetriever, loadImages, path);
+            auto obj = CreateObjectFromJson(jRoot, &fileDataRetriever, loadImages, path);
+            gLoadStat[6]++;
+            gLoadStat[7] += t1 - t0;
+            gLoadStat[8] += (Platform::GetTicks() - t1) - (gLoadStat[4] - nestedBefore);
+            return obj;
         }
         catch (const std::runtime_error& err)
         {

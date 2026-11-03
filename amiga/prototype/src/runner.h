@@ -5,6 +5,7 @@
 #define AMIGA_RUNNER_H
 #include <stdint.h>
 #include <stddef.h>
+#include "park_map.h"
 
 #define MAX_WIDTH 640
 #define MAX_HEIGHT 480
@@ -29,9 +30,9 @@ typedef struct {
 } Canvas;
 typedef struct { int x, y, w, h; } Rect;
 typedef struct {
-    int width, height, bench;
+    int width, height, bench, markers;
     uint32_t mode;
-    char g1_path[512];
+    char g1_path[512], map_path[512];
 } Options;
 enum {
     KEY_NONE, KEY_QUIT, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN,
@@ -40,6 +41,8 @@ enum {
 };
 typedef struct {
     G1 g1;
+    ParkMap map;
+    int map_guest_sprites, map_zoom, map_base, map_guests_visible, map_tracks_visible, map_ride_selected;
     Canvas canvas;
     uint8_t *background;
     uint8_t dirty[MAX_DIRTY];
@@ -53,11 +56,14 @@ typedef struct {
 int g1_open(G1 *g, const void *bytes, uint32_t size);
 int g1_sprite(const G1 *g, uint32_t id, Sprite *s);
 int g1_draw(const G1 *g, uint32_t id, Canvas *c, int x, int y, uint8_t colour);
+int g1_draw_guest(const G1 *, uint32_t, Canvas *, int, int, unsigned, unsigned, unsigned);
 void g1_palette(const G1 *g, uint32_t rgb[256]);
 void default_palette(uint32_t rgb[256]);
 void options_init(Options *o);
 int options_parse(Options *o, const char *args, int length);
 void runner_init(Runner *r, uint8_t *frame, uint8_t *background, int w, int h);
+int runner_set_map(Runner *r, const void *data, uint32_t size);
+void runner_map_background(Runner *r, Canvas *c);
 void runner_input(Runner *r, int key);
 void runner_render(Runner *r);
 void runner_step(Runner *r, uint32_t elapsed_ticks, uint32_t frequency);

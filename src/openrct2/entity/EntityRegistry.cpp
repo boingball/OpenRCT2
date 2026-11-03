@@ -9,18 +9,23 @@
 
 #include "EntityRegistry.h"
 
+#include "../platform/AmigaTrace.h"
+
 #include "../Diagnostic.h"
 #include "../GameState.h"
 #include "../core/Algorithm.hpp"
 #include "../core/ChecksumStream.h"
 #include "../core/DataSerialiser.h"
 #include "../core/Guard.hpp"
+#include "../core/MemoryStream.h"
 #include "../core/String.hpp"
 #include "../entity/EntityList.h"
 #include "../entity/Staff.h"
 #include "../interface/Viewport.h"
 #include "../peep/RideUseSystem.h"
 #include "../profiling/Profiling.h"
+#include "../ride/Ride.h"
+#include "../ride/RideManager.hpp"
 #include "../ride/Vehicle.h"
 #include "../world/Map.h"
 #include "Balloon.h"
@@ -30,7 +35,10 @@
 #include "MoneyEffect.h"
 #include "Particle.h"
 
+#include <algorithm>
 #include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <iterator>
 #include <vector>
 
@@ -38,20 +46,7 @@ namespace OpenRCT2
 {
     using namespace OpenRCT2::Core;
 
-    static constexpr uint32_t ComputeSpatialIndex(const CoordsXY& loc)
-    {
-        if (loc.isNull())
-            return kSpatialIndexNullBucket;
 
-        // NOTE: The input coordinate is rotated and can have negative components.
-        const auto tileX = std::abs(loc.x) / kCoordsXYStep;
-        const auto tileY = std::abs(loc.y) / kCoordsXYStep;
-
-        if (tileX >= kMaximumMapSizeTechnical || tileY >= kMaximumMapSizeTechnical)
-            return kSpatialIndexNullBucket;
-
-        return tileX * kMaximumMapSizeTechnical + tileY;
-    }
 
     static constexpr uint32_t GetSpatialIndex(EntityBase& entity)
     {
@@ -78,75 +73,128 @@ namespace OpenRCT2
     }
 
     // TODO: make part of EntityList unit?
-    uint16_t EntityRegistry::getEntityListCount(EntityType type)
-    {
-        return static_cast<uint16_t>(_entityLists[EnumValue(type)].size());
-    }
+
 
     // TODO: make part of EntityList unit?
-    uint16_t EntityRegistry::getNumFreeEntities()
-    {
-        return static_cast<uint16_t>(_freeIdList.size());
-    }
+
+
+    // The entity slot must hold the largest entity type on every target. Everything the registry can
+    // place in a slot is listed here; a new type that outgrows the slot fails the build rather than
+    // corrupting its neighbour.
+    static_assert(sizeof(Guest) <= kEntitySlotSize, "Guest does not fit an entity slot");
+    static_assert(sizeof(Staff) <= kEntitySlotSize, "Staff does not fit an entity slot");
+    static_assert(sizeof(Vehicle) <= kEntitySlotSize, "Vehicle does not fit an entity slot");
+    static_assert(sizeof(Litter) <= kEntitySlotSize, "Litter does not fit an entity slot");
+    static_assert(sizeof(Balloon) <= kEntitySlotSize, "Balloon does not fit an entity slot");
+    static_assert(sizeof(Duck) <= kEntitySlotSize, "Duck does not fit an entity slot");
+    static_assert(sizeof(MoneyEffect) <= kEntitySlotSize, "MoneyEffect does not fit an entity slot");
+    static_assert(sizeof(JumpingFountain) <= kEntitySlotSize, "JumpingFountain does not fit an entity slot");
+    static_assert(sizeof(SteamParticle) <= kEntitySlotSize, "SteamParticle does not fit an entity slot");
+    static_assert(sizeof(ExplosionCloud) <= kEntitySlotSize, "ExplosionCloud does not fit an entity slot");
+    static_assert(sizeof(ExplosionFlare) <= kEntitySlotSize, "ExplosionFlare does not fit an entity slot");
+    static_assert(sizeof(CrashSplashParticle) <= kEntitySlotSize, "CrashSplashParticle does not fit an entity slot");
+    static_assert(sizeof(VehicleCrashParticle) <= kEntitySlotSize, "VehicleCrashParticle does not fit an entity slot");
 
     std::string EntitiesChecksum::toString() const
     {
         return String::StringFromHex(raw);
     }
 
-    EntityBase* EntityRegistry::tryGetEntity(EntityId entityIndex)
+#ifdef __amigaos__
+    EntityRegistry::~EntityRegistry()
     {
-        const auto idx = entityIndex.ToUnderlying();
-        return idx >= kMaxEntities ? nullptr : &entities[idx].base;
+        releaseEntityChunks();
     }
 
-    EntityBase* EntityRegistry::getEntity(EntityId entityIndex)
+    void EntityRegistry::releaseEntityChunks()
     {
-        if (entityIndex.IsNull())
+        for (auto*& chunk : _entityChunks)
+        {
+            delete[] chunk;
+            chunk = nullptr;
+        }
+    }
+
+    // Allocates the chunk this id lives in if it does not exist yet. Only the two creation paths call this;
+    // every read goes through tryGetEntity and gets nullptr for an id nobody has created.
+    Entity_t* EntityRegistry::ensureChunkSlot(uint32_t idx)
+    {
+        if (idx >= kMaxEntities)
         {
             return nullptr;
         }
-        Guard::Assert(entityIndex.ToUnderlying() < kMaxEntities, "Tried getting entity %u", entityIndex.ToUnderlying());
-        return tryGetEntity(entityIndex);
-    }
-
-    const std::vector<EntityId>& EntityRegistry::getEntityTileList(const CoordsXY& spritePos)
-    {
-        return _entitySpatialIndex[ComputeSpatialIndex(spritePos)];
-    }
-
-    void EntityRegistry::resetEntityLists()
-    {
-        for (auto& list : _entityLists)
+        const uint32_t chunkIndex = idx >> kEntityChunkShift;
+        Entity_t*& chunk = _entityChunks[chunkIndex];
+        if (chunk == nullptr)
         {
-            list.clear();
+            chunk = new (std::nothrow) Entity_t[kEntityChunkSlots];
+            if (chunk == nullptr)
+            {
+                return nullptr;
+            }
+            // A slot's id is its position, as it was in the flat array, and an unused slot reads as null.
+            const uint32_t base = chunkIndex << kEntityChunkShift;
+            for (uint32_t i = 0; i < kEntityChunkSlots; i++)
+            {
+                chunk[i].base.type = EntityType::null;
+                chunk[i].base.id = EntityId::FromUnderlying(base + i);
+            }
         }
+        return &chunk[idx & kEntityChunkMask];
     }
+#endif
 
-    void EntityRegistry::resetFreeIds()
-    {
-        _freeIdList.clear();
-        _freeIdList.resize(kMaxEntities);
 
-        // List needs to be back to front to simplify removing
-        auto nextId = 0;
-        std::for_each(std::rbegin(_freeIdList), std::rend(_freeIdList), [&](auto& elem) {
-            elem = EntityId::FromUnderlying(nextId);
-            nextId++;
-        });
-    }
 
-    const std::list<EntityId>& EntityRegistry::getEntityList(const EntityType id)
-    {
-        return _entityLists[EnumValue(id)];
-    }
+
+
+
+
+
+
+
+
+
 
     /**
      *
      *  rct2: 0x0069EB13
      */
+#ifdef __amigaos__
+// One-shot: what the fixed entity store actually costs, and how much of each slot is padding.
+    #define AMIGA_TRACE_ONCE_SIZES()                                                                                           \
+        do                                                                                                                     \
+        {                                                                                                                      \
+            static bool _done = false;                                                                                         \
+            if (!_done && amiga_trace_enabled())                                                                               \
+            {                                                                                                                  \
+                _done = true;                                                                                                  \
+                char _b[320];                                                                                                  \
+                std::snprintf(                                                                                                 \
+                    _b, sizeof(_b),                                                                                            \
+                    "mem: entity slot %u B x %u = %u KB; largest type: guest %u staff %u vehicle %u litter %u balloon %u "      \
+                    "money %u steam %u; spatial index %u buckets x %u B = %u KB; ride %u B x %u = %u KB (station %u B x %u = %u B/ride)",                                              \
+                    static_cast<unsigned>(sizeof(Entity_t)), static_cast<unsigned>(kMaxEntities),                              \
+                    static_cast<unsigned>(sizeof(Entity_t) * kMaxEntities / 1024), static_cast<unsigned>(sizeof(Guest)),       \
+                    static_cast<unsigned>(sizeof(Staff)), static_cast<unsigned>(sizeof(Vehicle)),                              \
+                    static_cast<unsigned>(sizeof(Litter)), static_cast<unsigned>(sizeof(Balloon)),                             \
+                    static_cast<unsigned>(sizeof(MoneyEffect)), static_cast<unsigned>(sizeof(SteamParticle)),                  \
+                    static_cast<unsigned>(gEntitySpatialIndex.size()), static_cast<unsigned>(sizeof(std::vector<EntityId>)),   \
+                    static_cast<unsigned>(gEntitySpatialIndex.size() * sizeof(std::vector<EntityId>) / 1024),                 \
+                    static_cast<unsigned>(sizeof(Ride)), static_cast<unsigned>(OpenRCT2::Limits::kMaxRidesInPark),     \
+                    static_cast<unsigned>(sizeof(Ride) * OpenRCT2::Limits::kMaxRidesInPark / 1024),                       \
+                    static_cast<unsigned>(sizeof(RideStation)), static_cast<unsigned>(OpenRCT2::Limits::kMaxStationsPerRide), \
+                    static_cast<unsigned>(sizeof(RideStation) * OpenRCT2::Limits::kMaxStationsPerRide));                          \
+                amiga_trace(_b);                                                                                               \
+            }                                                                                                                  \
+        } while (0)
+#endif
+
     void EntityRegistry::resetAllEntities()
     {
+#ifdef __amigaos__
+        AMIGA_TRACE_ONCE_SIZES();
+#endif
         // Free all associated Entity pointers prior to zeroing memory
         for (int32_t i = 0; i < kMaxEntities; ++i)
         {
@@ -158,6 +206,15 @@ namespace OpenRCT2
             freeEntity(*spr);
         }
 
+#ifdef __amigaos__
+        // Hand every chunk back rather than clearing it: loading a second park should not keep the first
+        // park's slots alive. ensureChunkSlot rebuilds what the new park needs, and a fresh chunk already
+        // reads as "null type, id = position", which is what the loop below sets on other targets.
+        releaseEntityChunks();
+        std::fill(std::begin(_entityFlashingList), std::end(_entityFlashingList), false);
+        RideUse::GetHistory().Clear();
+        RideUse::GetTypeHistory().Clear();
+#else
         std::fill(std::begin(entities), std::end(entities), Entity_t());
         RideUse::GetHistory().Clear();
         RideUse::GetTypeHistory().Clear();
@@ -173,6 +230,7 @@ namespace OpenRCT2
 
             _entityFlashingList[i] = false;
         }
+#endif
         resetEntityLists();
         resetFreeIds();
         resetEntitySpatialIndices();
@@ -184,23 +242,10 @@ namespace OpenRCT2
      * This function looks as though it sets some sort of order for sprites.
      * Sprites can share their position if this is the case.
      */
-    void EntityRegistry::resetEntitySpatialIndices()
-    {
-        for (auto& vec : _entitySpatialIndex)
-        {
-            vec.clear();
-        }
-        for (EntityId::UnderlyingType i = 0; i < kMaxEntities; i++)
-        {
-            auto* entity = getEntity(EntityId::FromUnderlying(i));
-            if (entity != nullptr && entity->type != EntityType::null)
-            {
-                entitySpatialInsert(*entity, { entity->x, entity->y });
-            }
-        }
-    }
 
-#ifndef DISABLE_NETWORK
+
+#if !defined(DISABLE_NETWORK) || defined(__amigaos__)                                                                          \
+    || defined(OPENRCT2_KEEP_CHECKSUM) // Amiga: keep the checksum for cross-host verification
     EntitiesChecksum EntityRegistry::getAllEntitiesChecksum()
     {
         EntitiesChecksum checksum{};
@@ -208,6 +253,99 @@ namespace OpenRCT2
         ChecksumStream ms(checksum.raw);
         DataSerialiser ds(true, ms);
         networkSerialiseEntityTypes<Guest, Staff, Vehicle, Litter>(ds);
+
+        // Port bring-up: dump the exact bytes the checksum saw, so two hosts can be diffed.
+        const char* dumpPath = std::getenv("OPENRCT2_ENTITY_DUMP");
+    #ifdef __amigaos__
+        if (dumpPath == nullptr)
+            dumpPath = "PROGDIR:entities.bin";
+    #endif
+        if (dumpPath != nullptr)
+        {
+            MemoryStream buffer;
+            DataSerialiser dumpDs(true, buffer);
+            // Per-entity offset index, so a byte offset in the stream maps to (type, id, field region).
+            std::string idxPath = std::string(dumpPath) + ".idx";
+            auto* idx = std::fopen(idxPath.c_str(), "w");
+            auto logType = [&](const char* name, auto tag) {
+                using T = decltype(tag);
+                for (auto* ent : EntityList<T>())
+                {
+                    if (idx != nullptr)
+                        std::fprintf(
+                            idx, "%s id=%u off=%lu\n", name, ent->id.ToUnderlying(),
+                            static_cast<unsigned long>(buffer.GetLength()));
+                    ent->serialise(dumpDs);
+                }
+            };
+            logType("Guest", Guest{});
+            logType("Staff", Staff{});
+            logType("Vehicle", Vehicle{});
+            logType("Litter", Litter{});
+            if (idx != nullptr)
+            {
+                std::fprintf(idx, "END off=%lu\n", static_cast<unsigned long>(buffer.GetLength()));
+                std::fclose(idx);
+            }
+            if (auto* f = std::fopen(dumpPath, "wb"))
+            {
+                std::fwrite(buffer.GetData(), 1, static_cast<size_t>(buffer.GetLength()), f);
+                std::fclose(f);
+            }
+            // and a text listing of every vehicle's decision-relevant fields, for cross-host diffs
+            std::string txtPath = std::string(dumpPath) + ".txt";
+            if (auto* t = std::fopen(txtPath.c_str(), "w"))
+            {
+                for (auto* v : EntityList<Vehicle>())
+                {
+                    std::fprintf(
+                        t,
+                        "veh id=%u ride=%u sub=%u status=%d substate=%u vt=%u xyz=%d,%d,%d rem=%d vel=%d acc=%d prog=%u ttd=%u "
+                        "tl=%d,%d,%d st=%u lost=%u flags=%08x mass=%u speed=%u pacc=%u tsp=%u brk=%u peeps=%u/%u next=%u "
+                        "prev=%u nextride=%u bbs=%u\n",
+                        v->id.ToUnderlying(), v->ride.ToUnderlying(), v->ride_subtype, static_cast<int>(v->status),
+                        v->sub_state, v->vehicle_type, v->x, v->y, v->z, v->remaining_distance, v->velocity, v->acceleration,
+                        v->track_progress, static_cast<unsigned>(v->GetTrackType()) * 4u + v->GetTrackDirection(),
+                        v->TrackLocation.x, v->TrackLocation.y, v->TrackLocation.z, v->current_station.ToUnderlying(),
+                        v->lost_time_out, v->flags.holder, v->mass, v->speed, v->powered_acceleration,
+                        static_cast<unsigned>(v->TrackSubposition), v->brake_speed, v->num_peeps, v->num_seats,
+                        v->next_vehicle_on_train.ToUnderlying(), v->prev_vehicle_on_ride.ToUnderlying(),
+                        v->next_vehicle_on_ride.ToUnderlying(), v->BlockBrakeSpeed);
+                }
+                for (auto* g : EntityList<Guest>())
+                {
+                    std::fprintf(
+                        t,
+                        "guest id=%u xyz=%d,%d,%d o=%u next=%d,%d,%d nf=%u st=%u sub=%u act=%u afn=%u aio=%u step=%u "
+                        "wafn=%u dest=%d,%d,%u var37=%u goal=%d,%d,%d,%u hist=%d,%d,%d,%u;%d,%d,%d,%u;%d,%d,%d,%u;%d,%d,%d,%u "
+                        "toRide=%u curRide=%u lost=%u energy=%u flags=%08x pco=%u dir=%u\n",
+                        g->id.ToUnderlying(), g->x, g->y, g->z, g->orientation, g->nextLoc.x, g->nextLoc.y, g->nextLoc.z,
+                        g->nextFlags, static_cast<unsigned>(g->state), g->subState, static_cast<unsigned>(g->action),
+                        g->animationFrameNum, g->animationImageIdOffset, g->stepProgress, g->walkingAnimationFrameNum,
+                        g->destinationX, g->destinationY, g->destinationTolerance, g->var37, g->pathfindGoal.x,
+                        g->pathfindGoal.y, g->pathfindGoal.z, g->pathfindGoal.direction, g->pathfindHistory[0].x,
+                        g->pathfindHistory[0].y, g->pathfindHistory[0].z, g->pathfindHistory[0].direction, g->pathfindHistory[1].x,
+                        g->pathfindHistory[1].y, g->pathfindHistory[1].z, g->pathfindHistory[1].direction, g->pathfindHistory[2].x,
+                        g->pathfindHistory[2].y, g->pathfindHistory[2].z, g->pathfindHistory[2].direction, g->pathfindHistory[3].x,
+                        g->pathfindHistory[3].y, g->pathfindHistory[3].z, g->pathfindHistory[3].direction,
+                        g->guestHeadingToRideId.ToUnderlying(), g->currentRide.ToUnderlying(), g->guestIsLostCountdown,
+                        g->energy, static_cast<unsigned>(g->peepFlags.holder), g->pathCheckOptimisation, g->peepDirection);
+                }
+                for (auto& r : RideManager(getGameState()))
+                {
+                    std::fprintf(
+                        t,
+                        "ride id=%u type=%u status=%d flags=%08x reason=%d reasonPending=%d rel=%u unrel=%u downtime=%u "
+                        "speed=%u bullwheel=%u mode=%d ops=%u lastIssue=%u inspection=%u mechanic=%u\n",
+                        r.id.ToUnderlying(), r.type, static_cast<int>(r.status), static_cast<unsigned>(r.flags.holder),
+                        static_cast<int>(r.breakdownReason), static_cast<int>(r.breakdownReasonPending), r.reliability,
+                        r.unreliabilityFactor, r.downtime, r.speed, r.chairliftBullwheelRotation, static_cast<int>(r.mode),
+                        r.operationOption, r.lastIssueTime, static_cast<unsigned>(r.inspectionInterval),
+                        r.mechanic.ToUnderlying());
+                }
+                std::fclose(t);
+            }
+        }
 
         return checksum;
     }
@@ -218,26 +356,9 @@ namespace OpenRCT2
     }
 #endif // DISABLE_NETWORK
 
-    void EntityRegistry::entityReset(EntityBase& entity)
-    {
-        // Need to retain how the sprite is linked in lists
-        auto entityIndex = entity.id;
-        _entityFlashingList[entityIndex.ToUnderlying()] = false;
 
-        Entity_t* tempEntity = reinterpret_cast<Entity_t*>(&entity);
-        *tempEntity = Entity_t();
 
-        entity.id = entityIndex;
-        entity.type = EntityType::null;
-    }
 
-    void EntityRegistry::addToEntityList(EntityBase& entity)
-    {
-        auto& list = _entityLists[EnumValue(entity.type)];
-
-        // Entity list is sorted by id to prevent desyncs.
-        Algorithm::sortedInsert(list, entity.id);
-    }
 
     void EntityRegistry::addToFreeList(EntityId index)
     {
@@ -247,7 +368,7 @@ namespace OpenRCT2
 
     void EntityRegistry::removeFromEntityList(EntityBase& entity)
     {
-        auto& list = _entityLists[EnumValue(entity.type)];
+        auto& list = gEntityLists[EnumValue(entity.type)];
         auto ptr = Algorithm::binaryFind(std::begin(list), std::end(list), entity.id);
         if (ptr != std::end(list))
         {
@@ -267,26 +388,7 @@ namespace OpenRCT2
         return count;
     }
 
-    void EntityRegistry::prepareNewEntity(EntityBase& base, const EntityType type)
-    {
-        // Need to reset all sprite data, as the uninitialised values
-        // may contain garbage and cause a desync later on.
-        entityReset(base);
 
-        base.type = type;
-        addToEntityList(base);
-
-        base.x = kLocationNull;
-        base.y = kLocationNull;
-        base.z = 0;
-        base.spriteData.width = 0x10;
-        base.spriteData.heightMin = 0x14;
-        base.spriteData.heightMax = 0x8;
-        base.spriteData.spriteRect = {};
-        base.spatialIndex = kInvalidSpatialIndex;
-
-        entitySpatialInsert(base, { kLocationNull, 0 });
-    }
 
     EntityBase* EntityRegistry::createEntity(EntityType type)
     {
@@ -311,7 +413,12 @@ namespace OpenRCT2
             }
         }
 
+#ifdef __amigaos__
+        auto* slot = ensureChunkSlot(_freeIdList.back().ToUnderlying());
+        auto* entity = slot == nullptr ? nullptr : &slot->base;
+#else
         auto* entity = getEntity(_freeIdList.back());
+#endif
         if (entity == nullptr)
         {
             return nullptr;
@@ -323,25 +430,7 @@ namespace OpenRCT2
         return entity;
     }
 
-    EntityBase* EntityRegistry::createEntityAt(const EntityId index, const EntityType type)
-    {
-        auto id = Algorithm::binaryFind(std::rbegin(_freeIdList), std::rend(_freeIdList), index);
-        if (id == std::rend(_freeIdList))
-        {
-            return nullptr;
-        }
 
-        auto* entity = getEntity(index);
-        if (entity == nullptr)
-        {
-            return nullptr;
-        }
-
-        _freeIdList.erase(std::next(id).base());
-
-        prepareNewEntity(*entity, type);
-        return entity;
-    }
 
     /**
      *
@@ -362,22 +451,13 @@ namespace OpenRCT2
     }
 
     // Performs a search to ensure that insert keeps next_in_quadrant in sprite_index order
-    void EntityRegistry::entitySpatialInsert(EntityBase& entity, const CoordsXY& newLoc)
-    {
-        const auto newIndex = ComputeSpatialIndex(newLoc);
 
-        auto& spatialVector = _entitySpatialIndex[newIndex];
-
-        Algorithm::sortedInsert(spatialVector, entity.id);
-
-        entity.spatialIndex = newIndex;
-    }
 
     void EntityRegistry::entitySpatialRemove(EntityBase& entity)
     {
         const auto currentIndex = GetSpatialIndex(entity);
 
-        auto& spatialVector = _entitySpatialIndex[currentIndex];
+        auto& spatialVector = gEntitySpatialIndex[currentIndex];
         auto index = Algorithm::binaryFind(std::begin(spatialVector), std::end(spatialVector), entity.id);
         if (index != std::end(spatialVector))
         {
@@ -406,7 +486,7 @@ namespace OpenRCT2
 
     void EntityRegistry::updateEntitiesSpatialIndex()
     {
-        for (auto& entityList : _entityLists)
+        for (auto& entityList : gEntityLists)
         {
             for (auto& entityId : entityList)
             {
@@ -523,7 +603,7 @@ void EntityBase::setLocation(const CoordsXYZ& newLocation)
         return;
     }
 
-    const auto newSpatialIndex = ComputeSpatialIndex({ x, y });
+    const auto newSpatialIndex = getGameState().entities.computeSpatialIndex({ x, y });
     if (newSpatialIndex == GetSpatialIndex(*this))
     {
         // Avoid marking it dirty when we don't leave the current tile.

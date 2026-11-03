@@ -63,6 +63,8 @@ namespace OpenRCT2::Config
         bool showGuestPurchases;
         bool transparentScreenshot;
         bool transparentWater;
+        bool solidWindows; // opaque windows and bars: the viewport is never painted underneath them
+        int32_t pathfindTileBudget; // tiles a guest path search may examine (upstream: 15000)
 
         bool invisibleRides;
         bool invisibleVehicles;

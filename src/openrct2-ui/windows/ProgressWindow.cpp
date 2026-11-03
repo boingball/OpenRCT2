@@ -14,6 +14,7 @@
 #include <openrct2/Context.h>
 #include <openrct2/SpriteIds.h>
 #include <openrct2/audio/Audio.h>
+#include <openrct2/core/RandomSeed.h>
 #include <openrct2/drawing/Drawing.Sprite.h>
 #include <openrct2/drawing/Drawing.h>
 #include <openrct2/drawing/RenderTarget.h>
@@ -95,6 +96,7 @@ namespace OpenRCT2::Ui::Windows
             currentFrame = 0;
 
             ApplyStyle();
+
             resizeFrame();
         }
 
@@ -139,10 +141,9 @@ namespace OpenRCT2::Ui::Windows
             else
             {
                 // Pick a random style to start off with
-                std::random_device r;
                 auto upperBound = static_cast<int8_t>(std::size(kVehicleStyles)) - 1;
                 std::uniform_int_distribution<int> uniform_dist(0, upperBound);
-                std::default_random_engine e(r());
+                std::default_random_engine e(RandomDeviceSeed());
                 style = static_cast<int8_t>(uniform_dist(e));
             }
         }
@@ -245,7 +246,9 @@ namespace OpenRCT2::Ui::Windows
         }
 
         window->setCaption(text);
+
         window->setCloseCallback(onClose);
+
         return window;
     }
 

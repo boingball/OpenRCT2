@@ -1,0 +1,126 @@
+name: Amiga core port investigation
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'amiga/core/**'
+      - 'src/openrct2/MemoryProfile.h'
+      - 'src/openrct2/Limits.h'
+      - 'src/openrct2/entity/EntityRegistry*'
+      - 'src/openrct2/entity/EntitySpatialIndex.hpp'
+      - 'src/openrct2/world/MapLimits.h'
+      - 'src/openrct2/park/ParkFile.cpp'
+      - 'src/openrct2/rct2/S6Importer.cpp'
+      - 'src/openrct2/rct2/S6Header.h'
+      - 'src/openrct2/rct2/RCT2.h'
+      - 'src/openrct2/core/Endianness.h'
+      - 'src/openrct2/core/IStream.cpp'
+      - 'src/openrct2/sawyer_coding/**'
+      - 'src/openrct2/rct12/**'
+      - 'src/openrct2/rct2/S6ElementImport.*'
+      - 'src/openrct2/world/tile_element/**'
+      - 'src/openrct2/world/Footpath.cpp'
+      - 'src/openrct2/drawing/Colour*.cpp'
+      - 'src/openrct2/ride/Ride.cpp'
+      - 'src/openrct2/ride/RideStationData.cpp'
+      - 'src/openrct2/ride/ted/TrackElemType.cpp'
+      - '.github/workflows/amiga-core.yml'
+jobs:
+  compare-profiles:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: OpenRCT2/objects
+          ref: 978f596972c1163dc670d853dd6add4766f10dbd
+          path: build/objects-source
+      - name: Build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libzip-dev zlib1g-dev libzstd-dev libpng-dev libicu-dev nlohmann-json3-dev
+      - name: Configure and build both actual cores
+        run: |
+          for profile in full small; do
+            small=OFF
+            if [ "$profile" = small ]; then small=ON; fi
+            cmake -S . -B build/core-$profile -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release -DDISABLE_IPO=ON \
+              -DCMAKE_CXX_FLAGS=-Wno-error=stringop-overflow \
+              -DOPENRCT2_BUILD_CORE_BENCH=ON -DOPENRCT2_SMALL_MEMORY=$small \
+              -DDISABLE_GUI=ON -DENABLE_SCRIPTING=OFF -DDISABLE_NETWORK=ON \
+              -DDISABLE_HTTP=ON -DDISABLE_TTF=ON -DDISABLE_OPENGL=ON \
+              -DDISABLE_DISCORD_RPC=ON -DDISABLE_VERSION_CHECKER=ON \
+              -DDISABLE_FLAC=ON -DDISABLE_VORBIS=ON -DDOWNLOAD_OBJECTS=OFF \
+              -DDOWNLOAD_TITLE_SEQUENCES=OFF -DDOWNLOAD_OPENSFX=OFF -DDOWNLOAD_OPENMUSIC=OFF
+            cmake --build build/core-$profile --target openrct2-core-bench -j2
+          done
+      - name: Compare real simulations and test capacity rejection
+        run: |
+          mkdir -p build/headless-data
+          ln -s "$GITHUB_WORKSPACE/data/language" build/headless-data/language
+          ln -s "$GITHUB_WORKSPACE/build/objects-source/objects" build/headless-data/object
+          python3 amiga/core/verify_profiles.py \
+            build/core-full/amiga/core/openrct2-core-bench \
+            build/core-small/amiga/core/openrct2-core-bench \
+            "$GITHUB_WORKSPACE/build/headless-data" build/profile-verification
+      - uses: actions/upload-artifact@v4
+        with:
+          name: actual-core-profile-comparison
+          path: |
+            build/profile-verification/*.log
+            build/profile-verification/*.json
+  native-probes:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch OpenAmigaGCC 16.2.0-open4
+        run: |
+          curl -fsSL --retry 4 --retry-delay 5 -o /tmp/openamigagcc.tar.xz \
+            https://github.com/DalsinAI/openamigagcc/releases/download/v16.2.0-open4/openamigagcc-16.2.0-open4-x86_64-linux.tar.xz
+          echo '495319a2ffd803278f8827cad70074029c7aa9ecbe05d037e8646ba43ab94ab2  /tmp/openamigagcc.tar.xz' | sha256sum -c -
+          tar -xJf /tmp/openamigagcc.tar.xz -C /tmp
+      - name: Install forward headers for actual S6Data
+        run: |
+          sudo apt-get update && sudo apt-get install -y python3-pil nlohmann-json3-dev gcc-m68k-linux-gnu binutils-m68k-linux-gnu libc6-dev-m68k-cross qemu-user
+          python3 -m pip install machine68k==0.4.1
+          mkdir -p amiga/core/build/headers
+          cp -R /usr/include/nlohmann amiga/core/build/headers/
+      - name: Build native diagnostics and test host runtime
+        run: |
+          make -C amiga/core native test import-probes \
+            AMIGA_CXX=/tmp/openamigagcc-16.2.0-open4-x86_64-linux/bin/m68k-amigaos-g++
+      - name: Verify save fixtures and corrupt inputs on host
+        run: python3 amiga/core/verify_save_probe.py amiga/core/build/save-probe-host
+      - name: Check partial GameState imports and rejected files on host
+        run: python3 amiga/core/verify_partial_import.py amiga/core/build/import-probe-host
+      - name: Build and verify imported-map RTG viewer
+        run: |
+          python3 amiga/prototype/tools/guest_palette.py --check
+          make -C amiga/prototype amiga host test test-asan test-68k check-060
+          map=build/import-verification/host/bpb/ImportedMap.amap
+          amiga/prototype/build/runner_host build/park-view.ppm MAP="$map"
+          amiga/prototype/build/runner_host build/park-view-low.ppm MAP="$map" LOW
+          python3 amiga/prototype/tests/smoke_hunk.py \
+            amiga/prototype/build/OpenRCT2Runner "$map" build/park-view.ppm build/park-view-low.ppm
+          python3 amiga/prototype/tests/make_guest_fixture.py build/guest-fixture.dat
+          amiga/prototype/build/runner_host build/guest-view.ppm MAP="$map" build/guest-fixture.dat
+          amiga/prototype/build/runner_host build/guest-view-low.ppm MAP="$map" build/guest-fixture.dat LOW
+          python3 amiga/prototype/tests/smoke_hunk.py \
+            amiga/prototype/build/OpenRCT2Runner "$map" build/park-view.ppm build/park-view-low.ppm \
+            build/guest-fixture.dat build/guest-view.ppm build/guest-view-low.ppm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Amiga-native-core-probes-open4
+          path: |
+            amiga/core/build/OpenRCT2CoreProbe
+            amiga/core/build/OpenRCT2CoreProbe-Full
+            amiga/core/build/OpenRCT2SaveProbe
+            amiga/core/build/OpenRCT2ImportProbe
+            amiga/prototype/build/OpenRCT2Runner
+            build/park-view*.ppm
+            build/import-verification/host/**/ImportedMap.amap
+            build/import-verification/results.json
+            build/import-verification/host/**/run.log
+            build/save-verification/*.log
+            build/save-verification/results.json
+            amiga/core/README.md

@@ -192,6 +192,11 @@ struct PaintNodeStorage
         fixedPaintEntries.clear();
         dynamicPaintEntries.reset();
     }
+
+    size_t size() const
+    {
+        return fixedPaintEntries.size() + (dynamicPaintEntries.has_value() ? dynamicPaintEntries->size() : 0);
+    }
 };
 
 struct PaintSession : public PaintSessionCore
@@ -233,6 +238,60 @@ struct PaintSession : public PaintSessionCore
 };
 
 extern PaintSession gPaintSession;
+
+// Trace-only paint profile (AmigaOS, enabled by OPENRCT2_PAINT_PROF): sampled microseconds and calls per tile element
+// type (0-7 = TileElementType), 8 = tile element setup as a whole, 9 = entity setup, 10-12 = the three parts of
+// PaintSurface (neighbour descriptors, tile sides, ground image). Printed with the gfx trace line.
+extern uint32_t gPaintProfUs[13];
+extern uint32_t gPaintProfN[13];
+extern uint32_t gPaintSurfaceStat[4]; // surface paints, ground below target, tiles culled above target, entries added
+extern bool gPaintProfEnabled;
+#ifdef __amigaos__
+    #include "../platform/AmigaTrace.h"
+struct PaintProfScope
+{
+    unsigned t0 = 0;
+    int idx;
+    bool active;
+    // A scope samples one call in sixteen. `phase` picks WHICH sixteenth: scopes that nest inside one another are
+    // called in lockstep, so with the same phase they would always sample the same call and the outer one would then
+    // be measuring the inner one's clock reads (a read pair costs more than a whole PaintSurface on a PiStorm).
+    // Distinct phases make the samples disjoint, so every scope measures only its own work.
+    PaintProfScope(int i, unsigned phase = 0)
+        : idx(i)
+        , active(gPaintProfEnabled && ((gPaintProfN[i]++ * 2654435761u) >> 28) == phase)
+    {
+        if (active)
+            t0 = amiga_ticks_us();
+    }
+    ~PaintProfScope()
+    {
+        if (active)
+        {
+            // Subtract what the clock read itself costs (20 us on a PiStorm), or these scopes measure
+            // the bus rather than the paint. Nested scopes each pay it once, so each is corrected once.
+            static const unsigned bias = amiga_ticks_bias_us();
+            const unsigned dt = amiga_ticks_us() - t0;
+            gPaintProfUs[idx] += dt > bias ? dt - bias : 0;
+        }
+    }
+};
+    #define PAINT_PROF_SCOPE(idx) PaintProfScope _paintProf(idx)
+    #define PAINT_PROF_SCOPE_PHASE(idx, phase) PaintProfScope _paintProf##idx(idx, phase)
+#else
+    #define PAINT_PROF_SCOPE(idx) ((void)0)
+    #define PAINT_PROF_SCOPE_PHASE(idx, phase) ((void)0)
+#endif
+
+// Highest clearance (in z units = pixels) of any tile element in the map, plus whatever the tile walk has seen
+// since. Bounds how many tile rows below the viewport PaintSessionGenerate has to visit: the fixed allowance of
+// 2128 px (a tile stack of the maximum possible height) makes an 480 px viewport walk 81 rows per column, while
+// a real park rarely needs more than 30.
+extern int32_t gPaintMaxTileHeight;
+constexpr int32_t kPaintHeightRegions = 64; // 16x16-tile regions; covers maps up to 1024 tiles
+extern uint16_t gPaintRegionMaxHeight[kPaintHeightRegions][kPaintHeightRegions];
+void PaintRecomputeMaxTileHeight();
+
 
 // Globals for paint clipping
 extern uint8_t gClipHeight;

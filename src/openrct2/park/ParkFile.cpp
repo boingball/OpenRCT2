@@ -11,6 +11,7 @@
 
 #include "../Cheats.h"
 #include "../Context.h"
+#include "../platform/AmigaTrace.h"
 #include "../Diagnostic.h"
 #include "../Game.h"
 #include "../GameState.h"
@@ -65,6 +66,7 @@
 #include "Legacy.h"
 #include "ParkPreview.h"
 
+#include <bit>
 #include <cassert>
 #include <cstdint>
 #include <ctime>
@@ -166,9 +168,11 @@ namespace OpenRCT2
         void Import(GameState_t& gameState)
         {
             auto& os = *_os;
+            AMIGA_TRACE("park: tiles chunk");
             ReadWriteTilesChunk(gameState, os);
             ReadWriteBannersChunk(gameState, os);
             ReadWriteRidesChunk(gameState, os);
+            AMIGA_TRACE("park: entities chunk");
             ReadWriteEntitiesChunk(gameState, os);
             ReadWriteScenarioChunk(gameState, os);
             ReadWriteGeneralChunk(gameState, os);
@@ -371,6 +375,9 @@ namespace OpenRCT2
                                     {
                                         RCTObjectEntry datEntry;
                                         cs.read(&datEntry, sizeof(datEntry));
+                                        if constexpr (std::endian::native == std::endian::big)
+                                            datEntry.LittleEndianToHost(); // raw 16-byte DAT entry: flags/checksum are
+                                                                           // little-endian
                                         ObjectEntryDescriptor desc(datEntry);
                                         if (version < kFixedObsoleteFootpathsVersion && datEntry.GetType() == ObjectType::paths)
                                         {
@@ -545,7 +552,13 @@ namespace OpenRCT2
                                 else
                                 {
                                     cs.write(kDescriptorDat);
-                                    cs.write(&entry.Entry, sizeof(RCTObjectEntry));
+                                    {
+                                        // stored little-endian on disk on every host
+                                        RCTObjectEntry le = entry.Entry;
+                                        if constexpr (std::endian::native == std::endian::big)
+                                            le.LittleEndianToHost();
+                                        cs.write(&le, sizeof(RCTObjectEntry));
+                                    }
                                 }
                             }
                             else
@@ -915,7 +928,13 @@ namespace OpenRCT2
                         if (String::iequals(extension, ".dat"))
                         {
                             cs.write(kDescriptorDat);
-                            cs.write(&ori->ObjectEntry, sizeof(RCTObjectEntry));
+                            {
+                                // stored little-endian on disk on every host
+                                RCTObjectEntry le = ori->ObjectEntry;
+                                if constexpr (std::endian::native == std::endian::big)
+                                    le.LittleEndianToHost();
+                                cs.write(&le, sizeof(RCTObjectEntry));
+                            }
                         }
                         else if (String::iequals(extension, ".parkobj"))
                         {
@@ -1255,6 +1274,63 @@ namespace OpenRCT2
             }
         }
 
+#ifdef __amigaos__
+        // Tile elements are stored raw (16 bytes, little-endian) in the tiles chunk.
+        // Offsets from the element definitions; every other field is one byte.
+        static void SwapTileElementBytes(TileElement& el)
+        {
+            auto* b = reinterpret_cast<uint8_t*>(&el);
+            auto sw = [&](size_t o) { std::swap(b[o], b[o + 1]); };
+            switch (el.getType())
+            {
+                case TileElementType::path:
+                    sw(5);           // surfaceIndex
+                    sw(7);           // railingsIndex
+                    if (b[0] & 0x01) // FOOTPATH_ELEMENT_TYPE_FLAG_IS_QUEUE lives in the type byte; only queues carry a 16-bit
+                                     // ride index at 13
+                        sw(13);
+                    break;
+                case TileElementType::track:
+                    sw(5);  // trackType
+                    sw(12); // rideIndex
+                    sw(14); // rideType
+                    // Maze rides store a 16-bit wall bitmap (mazeEntry) in the union at offset 7 instead of the
+                    // sequence/colourScheme bytes. Detect a maze from rideType (=20) regardless of the current byte
+                    // order — {20,0} in either order — since no real ride type is 0x1400.
+                    if ((b[14] == 20 && b[15] == 0) || (b[14] == 0 && b[15] == 20))
+                        sw(7); // mazeEntry
+                    break;
+                case TileElementType::smallScenery:
+                    sw(5); // entryIndex
+                    break;
+                case TileElementType::largeScenery:
+                    sw(5); // entryIndex
+                    sw(7); // bannerIndex
+                    break;
+                case TileElementType::wall:
+                    sw(5);  // entryIndex
+                    sw(10); // bannerIndex
+                    break;
+                case TileElementType::entrance:
+                    sw(8);  // pathType
+                    sw(10); // rideIndex
+                    sw(13); // entryIndex
+                    break;
+                case TileElementType::banner:
+                    sw(5); // index
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        static void FixTileElementsByteOrder(std::vector<TileElement>& elements)
+        {
+            for (auto& el : elements)
+                SwapTileElementBytes(el);
+        }
+#endif
+
         void ReadWriteTilesChunk(GameState_t& gameState, OrcaStream& os)
         {
             auto* pathToSurfaceMap = _pathToSurfaceMap;
@@ -1267,10 +1343,20 @@ namespace OpenRCT2
                     cs.readWrite(gameState.mapSize.x);
                     cs.readWrite(gameState.mapSize.y);
 
+                    if constexpr (MemoryProfile::kSmall)
+                    {
+                        if (cs.getMode() == OrcaStream::Mode::reading
+                            && !MemoryProfile::mapFits(gameState.mapSize.x, gameState.mapSize.y))
+                            throw std::runtime_error("Park exceeds the small-memory build's 256-tile map limit.");
+                    }
+
                     if (cs.getMode() == OrcaStream::Mode::writing)
                     {
                         auto tileElements = GetReorganisedTileElementsWithoutGhosts();
                         cs.write(static_cast<uint32_t>(tileElements.size()));
+#ifdef __amigaos__
+                        FixTileElementsByteOrder(tileElements);
+#endif
                         cs.write(tileElements.data(), tileElements.size() * sizeof(TileElement));
                         return;
                     }
@@ -1278,9 +1364,17 @@ namespace OpenRCT2
                     gameStateInitAll(gameState, gameState.mapSize);
 
                     auto numElements = cs.read<uint32_t>();
+                    if constexpr (MemoryProfile::kSmall)
+                    {
+                        if (numElements > kMaxTileElements)
+                            throw std::runtime_error("Park exceeds the small-memory build's tile-element limit.");
+                    }
                     std::vector<TileElement> tileElements;
                     tileElements.resize(numElements);
                     cs.read(tileElements.data(), tileElements.size() * sizeof(TileElement));
+#ifdef __amigaos__
+                    FixTileElementsByteOrder(tileElements);
+#endif
                     SetTileElements(gameState, std::move(tileElements));
 
                     auto targetVersion = os.getHeader().targetVersion;
@@ -1536,6 +1630,13 @@ namespace OpenRCT2
                     // Ride ID
                     cs.readWrite(rideId);
 
+                    if constexpr (MemoryProfile::kSmall)
+                    {
+                        if (cs.getMode() == OrcaStream::Mode::reading
+                            && rideId.ToUnderlying() >= Limits::kMaxRidesInPark)
+                            throw std::runtime_error("Park contains a ride ID outside the small-memory build's range.");
+                    }
+
                     auto& ride = [&]() -> Ride& {
                         if (cs.getMode() == OrcaStream::Mode::writing)
                             return *GetRide(rideId);
@@ -1592,6 +1693,9 @@ namespace OpenRCT2
 
                     // Stations
                     cs.readWrite(ride.numStations);
+                    // The station array is bounded and can be smaller than the file's (see Limits.h), so the
+                    // count must not outrun it: everything that walks stations by count would run off the end.
+                    ride.numStations = std::min<uint8_t>(ride.numStations, Limits::kMaxStationsPerRide);
                     cs.readWriteArray(ride.getStations(), [&cs](RideStation& station) {
                         cs.readWrite(station.start);
                         cs.readWrite(station.height);
@@ -2799,6 +2903,11 @@ namespace OpenRCT2
             T placeholder{};
 
             auto index = cs.read<EntityId>();
+            if constexpr (MemoryProfile::kSmall)
+            {
+                if (index.ToUnderlying() >= kMaxEntities)
+                    throw std::runtime_error("Park contains an entity ID outside the small-memory build's range.");
+            }
             auto* ent = gameState.entities.createEntityAt<T>(index);
             if (ent == nullptr)
             {

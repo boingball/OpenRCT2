@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstdint>
+#include "../MemoryProfile.h"
 
 constexpr int32_t kCoordsXYStep = 32;
 constexpr int32_t kCoordsXYHalfTile = (kCoordsXYStep / 2);
@@ -17,7 +18,7 @@ constexpr int32_t kCoordsZStep = 8;
 constexpr int32_t kCoordsZPerTinyZ = 16;
 
 constexpr uint8_t kMinimumMapSizeTechnical = 5;
-constexpr uint16_t kMaximumMapSizeTechnical = 1001;
+constexpr uint16_t kMaximumMapSizeTechnical = OpenRCT2::MemoryProfile::kMapSize;
 constexpr int16_t kMinimumMapSizePractical = (kMinimumMapSizeTechnical - 2);
 constexpr int16_t kMaximumMapSizePractical = (kMaximumMapSizeTechnical - 2);
 constexpr int32_t kMaximumMapSizeBig = kCoordsXYStep * kMaximumMapSizeTechnical;
@@ -42,4 +43,4 @@ constexpr uint8_t kConstructionRightsClearanceSmall = 3;
 constexpr uint8_t kConstructionRightsClearanceBig = 3 * kCoordsZStep;
 
 constexpr uint32_t kMaxTileElementsWithSpaceRoom = 0x1000000;
-constexpr uint32_t kMaxTileElements = kMaxTileElementsWithSpaceRoom - 512;
+constexpr uint32_t kMaxTileElements = OpenRCT2::MemoryProfile::kTileElements;

@@ -8,6 +8,11 @@
  *****************************************************************************/
 
 #include "GameState.h"
+#include "platform/AmigaTrace.h"
+#include "core/String.hpp"
+#include "entity/Peep.h"
+#include "peep/GuestPathfinding.h"
+#include "platform/Platform.h"
 
 #include "Game.h"
 #include "GameStateSnapshots.h"
@@ -305,22 +310,42 @@ namespace OpenRCT2
         auto day = gameState.date.GetDay();
 #endif
 
+#ifdef __amigaos__
+        // trace-gated tick profile: ms per 40 ticks for the main subsystems
+        static uint32_t tp[10] = {};
+        static uint32_t tpTicks = 0;
+        uint32_t t0 = Platform::GetTicks();
+    #define TP(i)                                                                                                            \
+        do                                                                                                                 \
+        {                                                                                                                  \
+            uint32_t tn = Platform::GetTicks();                                                                            \
+            tp[i] += tn - t0;                                                                                              \
+            t0 = tn;                                                                                                       \
+        } while (0)
+#else
+    #define TP(i) ((void)0)
+#endif
         DateUpdate(gameState);
 
         ScenarioUpdate(gameState);
         Weather::update();
         MapUpdateTiles();
+        TP(0);
 
         // Temporarily remove provisional paths to prevent peep from interacting with them
         auto removeProvisionalIntent = Intent(INTENT_ACTION_REMOVE_PROVISIONAL_ELEMENTS);
         ContextBroadcastIntent(&removeProvisionalIntent);
 
         MapUpdatePathWideFlags();
+        TP(1);
         PeepUpdateAll();
+        TP(2);
         auto restoreProvisionalIntent = Intent(INTENT_ACTION_RESTORE_PROVISIONAL_ELEMENTS);
         ContextBroadcastIntent(&restoreProvisionalIntent);
         VehicleUpdateAll();
+        TP(3);
         gameState.entities.updateAllMiscEntities();
+        TP(4);
         Ride::updateAll();
         auto& park = gameState.park;
 
@@ -335,9 +360,57 @@ namespace OpenRCT2
         park.newsItems.updateActiveItem();
 
         MapAnimations::InvalidateAndUpdateAll();
+        TP(7);
         VehicleSoundsUpdate();
         PeepUpdateCrowdNoise();
         Weather::updateSound();
+        TP(8);
+#ifdef __amigaos__
+        if (++tpTicks % 40 == 0)
+        {
+            AMIGA_TRACE(String::stdFormat(
+                            "tick: per 40 ticks: date/scenario/weather/tiles %u, pathflags %u, peeps %u, vehicles %u, misc %u, rides %u, "
+                            "park/research/ratings %u, animations %u, sounds %u ms; %u guests in park",
+                            tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], tp[6], tp[7], tp[8], gameState.park.numGuestsInPark)
+                            .c_str());
+            for (auto& v : tp)
+                v = 0;
+            {
+                static const char* kStates[24] = { "falling",   "one",      "queuingFront", "onRide",    "leavingRide", "walking",
+                                                   "queuing",   "entering", "sitting",      "picked",    "patrolling",  "mowing",
+                                                   "sweeping",  "entPark",  "leavingPark",  "answering", "fixing",      "buying",
+                                                   "watching",  "emptyBin", "usingBin",     "watering",  "toInspect",   "inspecting" };
+                std::string line = "tick: guest update ms/calls by state:";
+                for (int n = 0; n < 5; n++)
+                {
+                    int best = -1;
+                    for (int st = 0; st < 32; st++)
+                        if (gPeepStateN[st] != 0 && (best < 0 || gPeepStateUs[st] > gPeepStateUs[best]))
+                            best = st;
+                    if (best < 0)
+                        break;
+                    line += std::string(" ") + (best < 24 ? kStates[best] : "?") + " " + std::to_string(gPeepStateUs[best] / 1000) + "/"
+                        + std::to_string(gPeepStateN[best]);
+                    gPeepStateN[best] = 0;
+                }
+                for (int st = 0; st < 32; st++)
+                    gPeepStateUs[st] = gPeepStateN[st] = 0;
+                AMIGA_TRACE(line.c_str());
+                AMIGA_TRACE((std::string("tick: pathfind: ") + std::to_string(PathFinding::gPathStat[0]) + " destinations in "
+                             + std::to_string(PathFinding::gPathStat[1] / 1000) + " ms, " + std::to_string(PathFinding::gPathStat[2])
+                             + " edge searches, " + std::to_string(PathFinding::gPathStat[3]) + " tiles checked; "
+                             + std::to_string(PathFinding::gPathStat[4]) + " searches exhausted their budget with "
+                             + std::to_string(PathFinding::gPathStat[5]) + " tiles; " + std::to_string(PathFinding::gPathStat[6]) + " of "
+                             + std::to_string(PathFinding::gPathStat[7]) + " direction choices repeat a recent (tile, goal); "
+                             + std::to_string(PathFinding::gPathStat[10]) + " elements iterated, " + std::to_string(PathFinding::gPathStat[11])
+                             + " junction visits, thin-junction tests " + std::to_string(PathFinding::gPathStat[9] / 1000) + " ms")
+                                .c_str());
+                for (auto& v : PathFinding::gPathStat)
+                    v = 0;
+            }
+        }
+#endif
+#undef TP
 
         EditorScene::OpenWindowsForCurrentStep();
 

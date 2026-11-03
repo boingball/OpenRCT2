@@ -19,6 +19,8 @@
 #include "JobPool.h"
 #include "Numerics.hpp"
 #include "Path.hpp"
+#include "../platform/AmigaTrace.h"
+#include "../platform/Platform.h"
 
 #include <chrono>
 #include <list>
@@ -62,7 +64,12 @@ private:
     };
 
     // Index file format version which when incremented forces a rebuild
+#if defined(__amigaos__) && defined(OPENRCT2_AMIGA_THREADS)
+    // Rebuild indexes potentially cached by the first threaded I/O experiment.
+    static constexpr uint8_t kFileIndexVersion = 5;
+#else
     static constexpr uint8_t kFileIndexVersion = 4;
+#endif
 
     std::string const _name;
     uint32_t const _magicNumber;
@@ -104,9 +111,12 @@ public:
     std::vector<TItem> LoadOrBuild(int32_t language) const
     {
         std::vector<TItem> items;
+        [[maybe_unused]] const uint32_t t0 = OpenRCT2::Platform::GetTicks();
         auto scanResult = Scan();
+        [[maybe_unused]] const uint32_t t1 = OpenRCT2::Platform::GetTicks();
         auto readIndexResult = ReadIndexFile(language, scanResult.Stats);
-        if (readIndexResult.first)
+        bool loaded = readIndexResult.first;
+        if (loaded)
         {
             // Index was loaded
             items = std::move(readIndexResult.second);
@@ -116,6 +126,11 @@ public:
             // Index was not loaded
             items = Build(language, scanResult);
         }
+        [[maybe_unused]] const uint32_t t2 = OpenRCT2::Platform::GetTicks();
+        AMIGA_TRACE((std::string("index ") + _name + ": scanned " + std::to_string(scanResult.Stats.TotalFiles) + " files in "
+                     + std::to_string(t1 - t0) + " ms, " + (loaded ? "loaded " : "REBUILT ") + std::to_string(items.size())
+                     + " items in " + std::to_string(t2 - t1) + " ms")
+                        .c_str());
         return items;
     }
 
@@ -180,7 +195,12 @@ private:
         const size_t totalCount = scanResult.Files.size();
         if (totalCount > 0)
         {
+#ifdef __amigaos__
+            AMIGA_TRACE("index: building on main task");
+            JobPool jobPool{ 0 };
+#else
             JobPool jobPool;
+#endif
             std::mutex mtx;
             std::atomic<size_t> processed{ 0 };
 
@@ -229,8 +249,14 @@ private:
                 if (header.HeaderSize == sizeof(FileIndexHeader) && header.MagicNumber == _magicNumber
                     && header.VersionA == kFileIndexVersion && header.VersionB == _version && header.LanguageId == language
                     && header.Stats.TotalFiles == stats.TotalFiles && header.Stats.TotalFileSize == stats.TotalFileSize
+#ifdef __amigaos__
+                    // Unpacking a new build's archive over an install stamps every object file with a new date and
+                    // forced the slow first-start scan again; count, size and path checksums still catch real changes.
+                    && header.Stats.PathChecksum == stats.PathChecksum)
+#else
                     && header.Stats.FileDateModifiedChecksum == stats.FileDateModifiedChecksum
                     && header.Stats.PathChecksum == stats.PathChecksum)
+#endif
                 {
                     items.reserve(header.NumItems);
                     OpenRCT2::DataSerialiser ds(false, fs);
