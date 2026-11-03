@@ -60,9 +60,9 @@ static Object* s_pointerObj = NULL;
 static struct BitMap* s_pointerBM = NULL;
 static int s_pointerShown = 1;
 static struct BitMap* s_agaBitmap = NULL;
-static UBYTE* s_agaPlanes = NULL;
+/* Chunky copy of what the Chip planes show; one byte per pixel, s_agaShadowPitch bytes per row. */
 static UBYTE* s_agaShadow = NULL;
-static int s_agaPitch = 0, s_agaPlaneSize = 0;
+static int s_agaPitch = 0, s_agaPlaneSize = 0, s_agaShadowPitch = 0;
 
 static int use_aga(void)
 {
@@ -88,11 +88,10 @@ static ULONG aga_mode(void)
 static void free_aga(void)
 {
     if (s_agaBitmap) { WaitBlit(); FreeBitMap(s_agaBitmap); }
-    if (s_agaPlanes) FreeVec(s_agaPlanes);
     if (s_agaShadow) FreeVec(s_agaShadow);
     s_agaBitmap = NULL;
-    s_agaPlanes = s_agaShadow = NULL;
-    s_agaPitch = s_agaPlaneSize = 0;
+    s_agaShadow = NULL;
+    s_agaPitch = s_agaPlaneSize = s_agaShadowPitch = 0;
 }
 
 static void free_pointer_shape(Object* obj, struct BitMap* bm)
@@ -239,15 +238,15 @@ int amiga_ui_open(int width, int height, const char* title, int* outWidth, int* 
                 return 0;
             }
         }
-        s_agaPlanes = AllocVec(8 * s_agaPlaneSize, MEMF_FAST | MEMF_CLEAR);
-        s_agaShadow = AllocVec(8 * s_agaPlaneSize, MEMF_FAST | MEMF_CLEAR);
-        if (!s_agaPlanes || !s_agaShadow)
+        s_agaShadowPitch = s_agaPitch * 8;
+        s_agaShadow = AllocVec((ULONG)s_agaShadowPitch * height, MEMF_FAST | MEMF_CLEAR);
+        if (!s_agaShadow)
         {
             screen_error("Fast bitmap allocation", OSERR_NOMEM);
             free_aga();
             return 0;
         }
-        amiga_trace("ui: AGA PAL 640x512x8, Fast-RAM c2p8 and changed-word Chip copy");
+        amiga_trace("ui: AGA PAL 640x512x8, single-pass c2p8 of changed 32-pixel groups");
     }
     else
     {
@@ -293,12 +292,12 @@ int amiga_ui_open(int width, int height, const char* title, int* outWidth, int* 
     if (s_agaBitmap)
     {
         int plane;
-        /* Intuition may have filled the backdrop. Start both Fast copies
-         * from the real bitmap so partial-word edges preserve its pixels. */
+        /* Intuition may have filled the backdrop. The chunky shadow must equal
+         * the planes, so clear the planes to match the cleared shadow; the first
+         * game frame repaints the whole screen anyway. */
         WaitBlit();
         for (plane = 0; plane < 8; ++plane)
-            memcpy(s_agaPlanes + plane * s_agaPlaneSize, s_agaBitmap->Planes[plane], (size_t)s_agaPlaneSize);
-        memcpy(s_agaShadow, s_agaPlanes, (size_t)(8 * s_agaPlaneSize));
+            memset(s_agaBitmap->Planes[plane], 0, (size_t)s_agaPlaneSize);
     }
     *outWidth = s_width;
     *outHeight = s_height;
@@ -407,9 +406,8 @@ void amiga_ui_blit(const unsigned char* src, int srcPitch, int x, int y, int w, 
         uint8_t* chip[8];
         int plane;
         for (plane = 0; plane < 8; ++plane) chip[plane] = s_agaBitmap->Planes[plane];
-        amiga_c2p8_rect(src, srcPitch, s_agaPlanes, s_agaPitch, s_agaPlaneSize, x, y, w, h);
         WaitBlit();
-        amiga_c2p8_present(s_agaPlanes, s_agaShadow, chip, s_agaPitch, s_agaPlaneSize, x, y, w, h);
+        amiga_c2p8_update(src, srcPitch, s_agaShadow, s_agaShadowPitch, chip, s_agaPitch, x, y, w, h);
         return;
     }
     if (s_blitMethod < 0)

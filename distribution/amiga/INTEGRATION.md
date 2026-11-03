@@ -296,9 +296,10 @@ planes; unavailable modes fail rather than silently selecting RTG.
 The custom bitmap has eight non-interleaved planes in Chip RAM.
 Its depth, stride/layout and Chip placement are checked. The OS owns the
 screen/copper handling; the supplied bitmap is freed after screen closure.
-Two contiguous Fast-RAM blocks hold working planes and a shadow of the
-display. At 640x512 these are 320 KiB each, plus a 320 KiB Chip bitmap.
-The existing chunky framebuffer remains in Fast RAM.
+One Fast-RAM block holds a chunky (one byte per pixel) shadow of what the
+planes show: 320 KiB at 640x512, plus the 320 KiB Chip bitmap. The existing
+chunky framebuffer remains in Fast RAM. (Before 0.28 this was two 320 KiB
+planar blocks; see "Single-pass AGA presenter" below.)
 
 The converter adapts Ami3D's `src/c2p.c` transpose to all eight planes,
 retaining its full 256-colour palette. Aligned 32-pixel groups use the
@@ -513,3 +514,30 @@ result. Before/after emulator timing uses the same flags, no FPU, dirty
 heap and sanitizer; emulator timing is not physical Chip-RAM bandwidth
 or a gameplay FPS claim. Real hardware AGA conversion timing, thread
 toggle stability and multiplayer completion remain tester gates.
+
+### Single-pass AGA presenter (0.28)
+
+The AGA presenter used three passes over every presented pixel: transpose
+into Fast-RAM planes, then compare those planes with a planar shadow, then
+copy the changed longwords to Chip RAM. It now makes one pass per 32-pixel
+group: the group's 32 chunky bytes are compared with a chunky shadow of the
+screen, and only a changed group is transposed and written to Chip RAM as
+eight longwords. An unchanged group costs two 32-byte reads; no transpose,
+no planar stores. A partly covered group is merged into the shadow and
+converted from there, so Chip RAM is still never read. Fast-RAM use drops
+from 640 KiB to 320 KiB. The screen planes are cleared at open so they
+start equal to the cleared shadow. The output is byte-identical to the old
+presenter over 3,000 random rectangles (host check).
+
+The drawing engine also tracks the changed extent per 32-row band instead
+of only one union rectangle. With the toolbar and the status bar dirty in
+the same frame the union is the whole screen; the bands skip the untouched
+middle. Consecutive bands with the same extent are presented together.
+`OPENRCT2_AGA_UNION=1` restores the single-union presentation for
+comparison; RTG output still presents the union.
+
+`openrct2-c2p8-bench` (amiga/core/tests/c2p8_bench.c) now times an
+all-changed and a mostly unchanged full-screen frame, with the planes in
+Chip RAM when run on AmigaOS, so it measures the real bus of the machine
+it runs on. The `gfx:` trace line's blit ms and kpx compare both modes in
+game. Physical A1200 frame rates remain to be measured.

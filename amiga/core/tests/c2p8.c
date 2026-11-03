@@ -23,15 +23,15 @@ static void verify(const uint8_t* chunky, uint8_t* const chip[8], int width, int
 
 static void exercise(int width, int height, int pitch, int iterations)
 {
-    const int planeSize = pitch * height, bytes = planeSize * 8;
+    const int planeSize = pitch * height;
     uint8_t* chunky = malloc((size_t)width * height);
-    uint8_t* fast = calloc((size_t)bytes, 1);
-    uint8_t* shadow = calloc((size_t)bytes, 1);
+    const int shadowPitch = pitch * 8;
+    uint8_t* shadow = calloc((size_t)shadowPitch * height, 1);
     uint8_t* chip[8];
     uint8_t* allocations[8];
     unsigned seed = 12345;
     int plane, i;
-    assert(chunky && fast && shadow);
+    assert(chunky && shadow);
     for (plane = 0; plane < 8; ++plane)
     {
         allocations[plane] = malloc((size_t)planeSize + 32);
@@ -41,10 +41,14 @@ static void exercise(int width, int height, int pitch, int iterations)
         memset(chip[plane], 0, (size_t)planeSize);
     }
     for (i = 0; i < width * height; ++i) chunky[i] = (uint8_t)(i * 37u + i / width * 19u);
-    amiga_c2p8_rect(chunky, width, fast, pitch, planeSize, 0, 0, width, height);
-    assert(amiga_c2p8_present(fast, shadow, chip, pitch, planeSize, 0, 0, width, height) > 0);
+    assert(amiga_c2p8_update(chunky, width, shadow, shadowPitch, chip, pitch, 0, 0, width, height) > 0);
     verify(chunky, chip, width, height, pitch);
-    assert(amiga_c2p8_present(fast, shadow, chip, pitch, planeSize, 0, 0, width, height) == 0);
+    assert(amiga_c2p8_update(chunky, width, shadow, shadowPitch, chip, pitch, 0, 0, width, height) == 0);
+    /* A dirty rectangle that is mostly unchanged writes only the groups that differ:
+     * one changed pixel inside a full-screen rectangle is one group. */
+    chunky[(height / 2) * width + width / 2 + 3] ^= 0x5A;
+    assert(amiga_c2p8_update(chunky, width, shadow, shadowPitch, chip, pitch, 0, 0, width, height) == 1);
+    verify(chunky, chip, width, height, pitch);
     for (i = 0; i < iterations; ++i)
     {
         int x, y, w, h, xx, yy;
@@ -59,10 +63,9 @@ static void exercise(int width, int height, int pitch, int iterations)
         for (yy = 0; yy < h; ++yy)
             for (xx = 0; xx < w; ++xx)
                 rectangle[yy * (w + 3) + xx] = chunky[(y + yy) * width + x + xx] ^= (uint8_t)(i + 1);
-        amiga_c2p8_rect(rectangle, w + 3, fast, pitch, planeSize, x, y, w, h);
-        amiga_c2p8_present(fast, shadow, chip, pitch, planeSize, x, y, w, h);
+        amiga_c2p8_update(rectangle, w + 3, shadow, shadowPitch, chip, pitch, x, y, w, h);
         verify(chunky, chip, width, height, pitch);
-        assert(amiga_c2p8_present(fast, shadow, chip, pitch, planeSize, x, y, w, h) == 0);
+        assert(amiga_c2p8_update(rectangle, w + 3, shadow, shadowPitch, chip, pitch, x, y, w, h) == 0);
         free(rectangle);
     }
     for (plane = 0; plane < 8; ++plane)
@@ -77,7 +80,7 @@ static void exercise(int width, int height, int pitch, int iterations)
         }
         free(allocations[plane]);
     }
-    free(chunky); free(fast); free(shadow);
+    free(chunky); free(shadow);
 }
 
 int main(void)

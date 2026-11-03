@@ -1,7 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Eight-plane adaptation of Ami3D's src/c2p.c transpose (boingball).
- * Fast-RAM planes plus a shadow of the Chip bitmap apply its PLANAR5FS
- * presentation technique to OpenRCT2's full 256-colour framebuffer.
+ *
+ * One pass per 32-pixel group: the group's chunky pixels are compared with a
+ * Fast-RAM chunky copy of what the Chip planes currently show, and only a
+ * group that changed is transposed and written to Chip RAM. Unchanged parts
+ * of a dirty rectangle therefore cost two 32-byte reads, no transpose and no
+ * Chip access. The chunky shadow is the only Fast-RAM buffer needed, and it
+ * also supplies the untouched pixels of a partially covered group, so Chip
+ * RAM is never read.
  */
 #include "amiga_c2p8.h"
 #include <string.h>
@@ -12,8 +18,7 @@ static uint32_t load_be(const uint8_t* p)
 {
 #ifdef __m68k__
     /* The source is already big-endian. memcpy permits unaligned scanlines
-     * without aliasing/alignment UB and GCC emits one 68020+ longword load.
-     * The byte/shift form otherwise emits four loads and three shifts. */
+     * without aliasing/alignment UB and GCC emits one 68020+ longword load. */
     uint32_t value;
     memcpy(&value, p, sizeof(value));
     return value;
@@ -25,7 +30,7 @@ static uint32_t load_be(const uint8_t* p)
 static void store_be(uint8_t* p, uint32_t value)
 {
 #ifdef __m68k__
-    /* AllocVec, planeSize, row pitch and word x are all longword aligned. */
+    /* Chip plane bases, the row pitch and every group offset are longword aligned. */
     *(uint32_t*)p = value;
 #else
     p[0] = (uint8_t)(value >> 24); p[1] = (uint8_t)(value >> 16);
@@ -33,10 +38,22 @@ static void store_be(uint8_t* p, uint32_t value)
 #endif
 }
 
-static void convert32(const uint8_t* src, uint8_t* dst, int planeSize)
+static uint32_t load_ne(const uint8_t* p)
 {
-    uint32_t x7 = load_be(src), x6 = load_be(src + 4), x5 = load_be(src + 8), x4 = load_be(src + 12);
-    uint32_t x3 = load_be(src + 16), x2 = load_be(src + 20), x1 = load_be(src + 24), x0 = load_be(src + 28);
+    uint32_t value;
+    memcpy(&value, p, sizeof(value));
+    return value;
+}
+
+static void store_ne(uint8_t* p, uint32_t value)
+{
+    memcpy(p, &value, sizeof(value));
+}
+
+/* Transposes 32 chunky pixels (big-endian longwords x7..x0) into one longword per plane. */
+static void convert32(uint32_t x7, uint32_t x6, uint32_t x5, uint32_t x4, uint32_t x3, uint32_t x2, uint32_t x1,
+    uint32_t x0, uint8_t* const chip[8], int offset)
+{
     MERGE(x0,x4,16,0x0000ffffUL); MERGE(x1,x5,16,0x0000ffffUL);
     MERGE(x2,x6,16,0x0000ffffUL); MERGE(x3,x7,16,0x0000ffffUL);
     MERGE(x0,x2,8,0x00ff00ffUL); MERGE(x1,x3,8,0x00ff00ffUL);
@@ -47,63 +64,65 @@ static void convert32(const uint8_t* src, uint8_t* dst, int planeSize)
     MERGE(x2,x6,2,0x33333333UL); MERGE(x3,x7,2,0x33333333UL);
     MERGE(x0,x2,1,0x55555555UL); MERGE(x1,x3,1,0x55555555UL);
     MERGE(x4,x6,1,0x55555555UL); MERGE(x5,x7,1,0x55555555UL);
-    store_be(dst, x0); store_be(dst + planeSize, x2);
-    store_be(dst + 2 * planeSize, x4); store_be(dst + 3 * planeSize, x6);
-    store_be(dst + 4 * planeSize, x1); store_be(dst + 5 * planeSize, x3);
-    store_be(dst + 6 * planeSize, x5); store_be(dst + 7 * planeSize, x7);
+    store_be(chip[0] + offset, x0); store_be(chip[1] + offset, x2);
+    store_be(chip[2] + offset, x4); store_be(chip[3] + offset, x6);
+    store_be(chip[4] + offset, x1); store_be(chip[5] + offset, x3);
+    store_be(chip[6] + offset, x5); store_be(chip[7] + offset, x7);
 }
 
-void amiga_c2p8_rect(const uint8_t* src, int srcPitch, uint8_t* planes,
-    int planarPitch, int planeSize, int x, int y, int w, int h)
+static void convert_from(const uint8_t* p, uint8_t* const chip[8], int offset)
 {
+    convert32(load_be(p), load_be(p + 4), load_be(p + 8), load_be(p + 12), load_be(p + 16), load_be(p + 20),
+        load_be(p + 24), load_be(p + 28), chip, offset);
+}
+
+unsigned amiga_c2p8_update(const uint8_t* src, int srcPitch, uint8_t* shadow, int shadowPitch,
+    uint8_t* const chip[8], int planarPitch, int x, int y, int w, int h)
+{
+    unsigned changed = 0;
+    const int end = x + w;
+    const int firstGroup = x & ~31;
     int row;
     for (row = 0; row < h; ++row)
     {
-        const uint8_t* in = src + row * srcPitch;
-        int xx = x, left = w;
-        while (left > 0)
+        const uint8_t* in = src + row * srcPitch; /* pixel x of this row */
+        uint8_t* sh = shadow + (y + row) * shadowPitch;
+        const int chipRow = (y + row) * planarPitch;
+        int gx;
+        for (gx = firstGroup; gx < end; gx += 32)
         {
-            uint8_t* out = planes + (y + row) * planarPitch + xx / 8;
-            if ((xx & 31) == 0 && left >= 32)
+            const int a = gx < x ? x : gx;
+            const int b = gx + 32 > end ? end : gx + 32;
+            if (b - a == 32)
             {
-                convert32(in, out, planeSize);
-                xx += 32; in += 32; left -= 32;
+                const uint8_t* s = in + (gx - x);
+                uint8_t* d = sh + gx;
+                const uint32_t s0 = load_ne(s), s1 = load_ne(s + 4), s2 = load_ne(s + 8), s3 = load_ne(s + 12);
+                const uint32_t s4 = load_ne(s + 16), s5 = load_ne(s + 20), s6 = load_ne(s + 24), s7 = load_ne(s + 28);
+                if (((s0 ^ load_ne(d)) | (s1 ^ load_ne(d + 4)) | (s2 ^ load_ne(d + 8)) | (s3 ^ load_ne(d + 12))
+                        | (s4 ^ load_ne(d + 16)) | (s5 ^ load_ne(d + 20)) | (s6 ^ load_ne(d + 24))
+                        | (s7 ^ load_ne(d + 28)))
+                    == 0)
+                    continue;
+                store_ne(d, s0); store_ne(d + 4, s1); store_ne(d + 8, s2); store_ne(d + 12, s3);
+                store_ne(d + 16, s4); store_ne(d + 20, s5); store_ne(d + 24, s6); store_ne(d + 28, s7);
+#ifdef __m68k__
+                /* Native order is big-endian: the loaded values are the transpose inputs. */
+                convert32(s0, s1, s2, s3, s4, s5, s6, s7, chip, chipRow + gx / 8);
+#else
+                convert_from(d, chip, chipRow + gx / 8);
+#endif
             }
             else
             {
-                unsigned plane;
-                uint8_t mask = (uint8_t)(0x80u >> (xx & 7));
-                for (plane = 0; plane < 8; ++plane)
-                {
-                    uint8_t* p = out + plane * planeSize;
-                    *p = (uint8_t)((*p & ~mask) | ((*in & (1u << plane)) ? mask : 0));
-                }
-                ++xx; ++in; --left;
+                /* Partly covered group: merge the covered pixels into the shadow, which holds the rest. */
+                if (memcmp(sh + a, in + (a - x), (size_t)(b - a)) == 0)
+                    continue;
+                memcpy(sh + a, in + (a - x), (size_t)(b - a));
+                convert_from(sh + gx, chip, chipRow + gx / 8);
             }
+            ++changed;
         }
     }
-}
-
-unsigned amiga_c2p8_present(const uint8_t* planes, uint8_t* shadow, uint8_t* const chip[8],
-    int planarPitch, int planeSize, int x, int y, int w, int h)
-{
-    unsigned changed = 0;
-    int plane, row, word;
-    const int first = x / 32, last = (x + w + 31) / 32;
-    for (plane = 0; plane < 8; ++plane)
-        for (row = y; row < y + h; ++row)
-            for (word = first; word < last; ++word)
-            {
-                const int offset = row * planarPitch + word * 4;
-                uint32_t value, old;
-                memcpy(&value, planes + plane * planeSize + offset, 4);
-                memcpy(&old, shadow + plane * planeSize + offset, 4);
-                if (value != old)
-                {
-                    memcpy(shadow + plane * planeSize + offset, &value, 4);
-                    memcpy(chip[plane] + offset, &value, 4);
-                    ++changed;
-                }
-            }
     return changed;
 }
