@@ -1,0 +1,11 @@
+; A1200 with the normal (non-threaded) build: AGA, Paula and the static title
+; menu, like OpenRCT2-A1200, but starting bin/openrct2 instead of the
+; experimental threaded/LAN executable. Start in the game drawer.
+.key RCT2DIR
+.def RCT2DIR "RCT2:"
+Failat 21
+SetEnv OPENRCT2_AUDIO PAULA
+SetEnv OPENRCT2_SKIP_TITLE 1
+Execute OpenRCT2-AGA "<RCT2DIR>"
+UnsetEnv OPENRCT2_SKIP_TITLE
+UnsetEnv OPENRCT2_AUDIO
