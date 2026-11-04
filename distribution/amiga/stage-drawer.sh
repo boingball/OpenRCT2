@@ -24,6 +24,20 @@ D="$OUT/OpenRCT2"
 rm -rf "$D"; mkdir -p "$D/bin" "$D/user"
 cp "$BUILD/openrct2" "$BUILD/OpenRCT2Check" "$D/bin/"
 cp -R "$DATA" "$D/data"
+# Unpack every .parkobj (a zip) into a folder holding its object.json, the layout earlier Amiga drawers used.
+# Loading the packed form corrupts the heap on the Amiga (dlmalloc FOOTERS abort while a park's objects load);
+# unpacked folders load correctly and skip the zip decompression. KEEP_PARKOBJ=1 keeps the packed files.
+if [ "${KEEP_PARKOBJ:-0}" != 1 ] && [ -d "$D/data/object" ]; then
+    command -v unzip >/dev/null || { echo "unzip is needed to unpack the objects (sudo apt install unzip)"; exit 1; }
+    find "$D/data/object" -name '*.parkobj' | while read -r f; do
+        dir="${f%.parkobj}"
+        mkdir -p "$dir"
+        unzip -q -o "$f" -d "$dir"
+        [ -f "$dir/object.json" ] || { echo "no object.json in $f"; exit 1; }
+        rm "$f"
+    done
+    echo "unpacked $(find "$D/data/object" -name object.json | wc -l) objects into folders"
+fi
 # Launch scripts with their icons; OpenRCT2-launcher.info is the icon of the main OpenRCT2 script.
 for s in OpenRCT2 OpenRCT2-AGA OpenRCT2-AGA-Paula OpenRCT2-Paula OpenRCT2-A1200 OpenRCT2-A1200-Offline \
          OpenRCT2-Experimental OpenRCT2-Experimental-AGA TraceStartup TraceStartup-NoAudio; do

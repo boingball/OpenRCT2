@@ -18,6 +18,7 @@
     #include <openrct2/interface/Viewport.h>
     #include <openrct2/interface/Window.h>
     #include <openrct2/drawing/Drawing.Sprite.h>
+    #include <openrct2/drawing/Drawing.h>
     #include <openrct2/paint/Paint.h>
     #include <openrct2/world/Weather.h>
     #include <openrct2/ride/TrackDesign.h>
@@ -137,6 +138,15 @@ public:
     {
         if (_width > 0 && _height > 0)
             markDirty(0, 0, static_cast<int32_t>(_width), static_cast<int32_t>(_height));
+    }
+
+    // A forced redraw repaints every window without going through the dirty grid; present all of it.
+    void PaintWindows() override
+    {
+        const bool forced = gPaintForceRedraw;
+        X8DrawingEngine::PaintWindows();
+        if (forced)
+            markWholeScreenDirty();
     }
 
     void PaintWeather() override
@@ -327,11 +337,13 @@ public:
     // A viewport scroll moves the already-drawn pixels inside the framebuffer and only the exposed strips are
     // drawn as dirty blocks. Since this engine pushes just the dirty union to the screen, the moved pixels have to
     // join that union or the screen scrolls in pieces (tester report: "scrollt nur so Teile vom Bildschirm").
+    //
+    // A zero shift copies nothing: the viewport-shift code (ShiftRedraw in Viewport.cpp) uses it to report a region
+    // it repainted straight into the framebuffer, outside the dirty grid.
     void CopyRect(int32_t x, int32_t y, int32_t width, int32_t height, int32_t dx, int32_t dy) override
     {
-        if (dx == 0 && dy == 0)
-            return;
-        X8DrawingEngine::CopyRect(x, y, width, height, dx, dy);
+        if (dx != 0 || dy != 0)
+            X8DrawingEngine::CopyRect(x, y, width, height, dx, dy);
         int32_t x0 = std::max<int32_t>(0, std::min(x, x - dx));
         int32_t y0 = std::max<int32_t>(0, std::min(y, y - dy));
         int32_t x1 = std::min<int32_t>(static_cast<int32_t>(_width), std::max(x, x - dx) + width);
