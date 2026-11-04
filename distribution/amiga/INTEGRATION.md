@@ -541,3 +541,14 @@ all-changed and a mostly unchanged full-screen frame, with the planes in
 Chip RAM when run on AmigaOS, so it measures the real bus of the machine
 it runs on. The `gfx:` trace line's blit ms and kpx compare both modes in
 game. Physical A1200 frame rates remain to be measured.
+
+### AGA 640x256 (0.29)
+
+`OPENRCT2_AGA_LINES=256` opens a PAL hires screen without interlace,
+640x256, instead of the 640x512 interlaced one: half the pixels for the
+viewport to generate and draw, no interlace flicker, pixels twice as tall.
+`OPENRCT2_AGA_LINES=512` fixes the tall screen. Without the variable a
+requested height of 256 or less selects 640x256, and the AGA mode list
+offers both, so Options > Display (Fullscreen) switches in game. Some tall
+windows do not fit 256 lines. `OpenRCT2-A1200-Low` sets the variable.
+

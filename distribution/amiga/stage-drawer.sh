@@ -39,7 +39,7 @@ if [ "${KEEP_PARKOBJ:-0}" != 1 ] && [ -d "$D/data/object" ]; then
     echo "unpacked $(find "$D/data/object" -name object.json | wc -l) objects into folders"
 fi
 # Launch scripts with their icons; OpenRCT2-launcher.info is the icon of the main OpenRCT2 script.
-for s in OpenRCT2 OpenRCT2-AGA OpenRCT2-AGA-Paula OpenRCT2-Paula OpenRCT2-A1200 OpenRCT2-A1200-Offline \
+for s in OpenRCT2 OpenRCT2-AGA OpenRCT2-AGA-Paula OpenRCT2-Paula OpenRCT2-A1200 OpenRCT2-A1200-Offline OpenRCT2-A1200-Low \
          OpenRCT2-Experimental OpenRCT2-Experimental-AGA TraceStartup TraceStartup-NoAudio; do
     cp "$HERE/$s" "$D/"
     [ -f "$HERE/$s.info" ] && cp "$HERE/$s.info" "$D/"

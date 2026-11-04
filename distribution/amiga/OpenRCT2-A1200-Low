@@ -1,0 +1,11 @@
+; A1200, normal build, 640x256 PAL hires without interlace: half the pixels to
+; draw and no flicker, but pixels are twice as tall and some tall windows do
+; not fit on screen. AGA, Paula and the static title menu as OpenRCT2-A1200-Offline.
+; Without this launcher, Options > Display > Fullscreen lists 640x512 and
+; 640x256 and switches between them in game.
+.key RCT2DIR
+.def RCT2DIR "RCT2:"
+Failat 21
+SetEnv OPENRCT2_AGA_LINES 256
+Execute OpenRCT2-A1200-Offline "<RCT2DIR>"
+UnsetEnv OPENRCT2_AGA_LINES
