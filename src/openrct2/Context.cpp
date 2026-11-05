@@ -147,6 +147,8 @@ namespace OpenRCT2
 #ifdef __amigaos__
         // Rolling average cost of one simulation tick, in milliseconds. See amigaMaxTicksPerFrame().
         uint32_t _amigaTickMsAvg = 0;
+        // Rolling average cost of one Draw(), in milliseconds. See amigaMaxTicksPerFrame().
+        uint32_t _amigaDrawMsAvg = 0;
 #endif
         float _realtimeAccumulator = 0.0f;
         float _timeScale = 1.0f;
@@ -1337,7 +1339,12 @@ namespace OpenRCT2
         {
             // Ticks
             float scaledDeltaTime = deltaTime * _timeScale;
+#ifdef __amigaos__
+            // Room for the extra ticks amigaMaxTicksPerFrame() allows when drawing is the expensive part.
+            _ticksAccumulator = std::min(_ticksAccumulator + scaledDeltaTime, kGameUpdateTimeMS * kAmigaMaxBalancedTicks);
+#else
             _ticksAccumulator = std::min(_ticksAccumulator + scaledDeltaTime, kGameUpdateMaxThreshold);
+#endif
 
             // Real Time.
             _realtimeAccumulator = std::min(_realtimeAccumulator + deltaTime, kGameUpdateMaxThreshold);
@@ -1360,17 +1367,35 @@ namespace OpenRCT2
          * untouched: every tick that runs is a whole, ordinary tick in the usual order, and the accumulator clamp in
          * UpdateTimeAccumulators already decided how many of them real time allows.
          *
+         * The opposite case is a small park on a slow machine: a tick costs 20 ms but a frame's drawing 200 ms (a
+         * 50 MHz 68060 at 640x512). One tick per drawn frame then runs the park at a tenth of real time. So the
+         * budget is also allowed to grow to half the drawing time: ticks never take more than a third of a frame,
+         * which costs at most a quarter of the frame rate and buys up to four times the game speed.
+         * OPENRCT2_TICK_BALANCE=0 keeps the budget at one tick's worth of real time.
+         *
          * OPENRCT2_NO_TICKCAP=1 restores the plain upstream behaviour for comparison.
          */
+        static constexpr uint32_t kAmigaMaxBalancedTicks = 4;
+
         uint32_t amigaMaxTicksPerFrame() const
         {
             static const bool disabled = amiga_env_flag("OPENRCT2_NO_TICKCAP") != 0;
+            static const bool noBalance = [] {
+                char v[4] = {};
+                return amiga_getenv_str("OPENRCT2_TICK_BALANCE", v, static_cast<int>(sizeof(v))) && v[0] == '0';
+            }();
             if (disabled || _amigaTickMsAvg <= 1)
                 return kGameMaxUpdates;
             // Fast forward asks for more game time per real second, so it gets a proportionally larger budget.
             const float budgetMs = kGameUpdateTimeMS * 1000.0f * std::max(_timeScale, 1.0f);
-            const uint32_t n = static_cast<uint32_t>(budgetMs / static_cast<float>(_amigaTickMsAvg));
-            return std::clamp<uint32_t>(n, 1u, kGameMaxUpdates);
+            const uint32_t n = std::clamp<uint32_t>(
+                static_cast<uint32_t>(budgetMs / static_cast<float>(_amigaTickMsAvg)), 1u, kGameMaxUpdates);
+            if (noBalance)
+                return n;
+            const uint32_t balanced = std::clamp<uint32_t>(
+                static_cast<uint32_t>(static_cast<float>(_amigaDrawMsAvg) / 2.0f / static_cast<float>(_amigaTickMsAvg)), 1u,
+                kAmigaMaxBalancedTicks);
+            return std::max(n, balanced);
         }
 
         void amigaNoteTickCost(uint32_t ms)
@@ -1510,7 +1535,11 @@ namespace OpenRCT2
             _painter->Paint(*_drawingEngine);
             _drawingEngine->EndDraw();
 #ifdef __amigaos__
-            gAmigaFrameStat[3] += Platform::GetTicks() - d0;
+            {
+                const uint32_t drawMs = Platform::GetTicks() - d0;
+                gAmigaFrameStat[3] += drawMs;
+                _amigaDrawMsAvg = (_amigaDrawMsAvg * 3 + std::min(drawMs, 1000u)) / 4;
+            }
             if (++gAmigaFrameStat[5] % 20 == 0)
             {
                 AMIGA_TRACE(String::stdFormat(
