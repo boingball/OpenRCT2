@@ -18,6 +18,7 @@
     #include <openrct2/interface/Viewport.h>
     #include <openrct2/interface/Window.h>
     #include <openrct2/drawing/Drawing.Sprite.h>
+    #include <openrct2/drawing/Drawing.h>
     #include <openrct2/paint/Paint.h>
     #include <openrct2/world/Weather.h>
     #include <openrct2/ride/TrackDesign.h>
@@ -39,10 +40,47 @@ private:
     // frame timing for the trace: rasterise (BeginDraw..blit), blit, pixels blitted
     unsigned _tBegin = 0, _msRaster = 0, _msBlit = 0;
     unsigned long _pxBlit = 0;
+
+    // Per-band horizontal extent of this frame's changes, 32 rows a band. The single dirty union above spans the
+    // whole screen as soon as the top toolbar and the bottom status bar change in the same frame, which is most
+    // frames; presenting band by band skips the untouched middle. Used for the AGA presenter, where every pixel
+    // in the presented area costs Fast-RAM reads even when unchanged. OPENRCT2_AGA_UNION=1 presents the union.
+    static constexpr int32_t kBandShift = 5;
+    static constexpr int32_t kMaxBands = 64;
+    int32_t _bandX0[kMaxBands];
+    int32_t _bandX1[kMaxBands];
+
     void resetDirtyBox()
     {
         _dbX0 = _dbY0 = 0x7FFFFFFF;
         _dbX1 = _dbY1 = -0x7FFFFFFF;
+        for (int32_t b = 0; b < kMaxBands; b++)
+        {
+            _bandX0[b] = 0x7FFFFFFF;
+            _bandX1[b] = -0x7FFFFFFF;
+        }
+    }
+
+    // x1/y1 exclusive, already clipped to the framebuffer.
+    void markDirty(int32_t x0, int32_t y0, int32_t x1, int32_t y1)
+    {
+        _dbX0 = std::min(_dbX0, x0);
+        _dbY0 = std::min(_dbY0, y0);
+        _dbX1 = std::max(_dbX1, x1);
+        _dbY1 = std::max(_dbY1, y1);
+        const int32_t b0 = std::min(y0 >> kBandShift, kMaxBands - 1);
+        const int32_t b1 = std::min((y1 - 1) >> kBandShift, kMaxBands - 1);
+        for (int32_t b = b0; b <= b1; b++)
+        {
+            _bandX0[b] = std::min(_bandX0[b], x0);
+            _bandX1[b] = std::max(_bandX1[b], x1);
+        }
+    }
+
+    void present(const uint8_t* bits, int32_t x0, int32_t y0, int32_t x1, int32_t y1)
+    {
+        amiga_ui_blit(bits + static_cast<size_t>(y0) * _pitch + x0, static_cast<int>(_pitch), x0, y0, x1 - x0, y1 - y0);
+        _pxBlit += static_cast<unsigned long>(x1 - x0) * static_cast<unsigned long>(y1 - y0);
     }
 
 public:
@@ -50,6 +88,7 @@ public:
         : X8DrawingEngine(uiContext)
         , _uiContext(uiContext)
     {
+        resetDirtyBox();
         AMIGA_TRACE("gfx: AmigaDrawingEngine created");
     }
 
@@ -97,10 +136,17 @@ public:
 
     void markWholeScreenDirty()
     {
-        _dbX0 = 0;
-        _dbY0 = 0;
-        _dbX1 = static_cast<int32_t>(_width);
-        _dbY1 = static_cast<int32_t>(_height);
+        if (_width > 0 && _height > 0)
+            markDirty(0, 0, static_cast<int32_t>(_width), static_cast<int32_t>(_height));
+    }
+
+    // A forced redraw repaints every window without going through the dirty grid; present all of it.
+    void PaintWindows() override
+    {
+        const bool forced = gPaintForceRedraw;
+        X8DrawingEngine::PaintWindows();
+        if (forced)
+            markWholeScreenDirty();
     }
 
     void PaintWeather() override
@@ -156,12 +202,45 @@ public:
             int32_t y1 = std::min<int32_t>(std::min<int32_t>(_dbY1, static_cast<int32_t>(_height)), window->height);
             if (x1 > x0 && y1 > y0)
             {
-                const uint8_t* src = reinterpret_cast<const uint8_t*>(_bits) + static_cast<size_t>(y0) * _pitch + x0;
+                const auto* bits = reinterpret_cast<const uint8_t*>(_bits);
                 unsigned tb = amiga_ticks_ms();
                 _msRaster += tb - _tBegin;
-                amiga_ui_blit(src, static_cast<int>(_pitch), x0, y0, x1 - x0, y1 - y0);
+                static const bool unionOnly = amiga_env_flag("OPENRCT2_AGA_UNION") != 0;
+                if (amiga_ui_blit_method() == 2 && !unionOnly)
+                {
+                    // Each band's own extent, clipped like the union; consecutive bands with the same extent
+                    // are presented as one rectangle.
+                    int32_t runY0 = -1, runX0 = 0, runX1 = 0, runY1 = 0;
+                    for (int32_t b = 0; b < kMaxBands; b++)
+                    {
+                        const int32_t by0 = std::max(y0, b << kBandShift);
+                        const int32_t by1 = b == kMaxBands - 1 ? y1 : std::min(y1, (b + 1) << kBandShift);
+                        const int32_t bx0 = std::max(x0, _bandX0[b]);
+                        const int32_t bx1 = std::min(x1, _bandX1[b]);
+                        const bool dirty = by1 > by0 && bx1 > bx0;
+                        if (runY0 >= 0 && (!dirty || bx0 != runX0 || bx1 != runX1 || by0 != runY1))
+                        {
+                            present(bits, runX0, runY0, runX1, runY1);
+                            runY0 = -1;
+                        }
+                        if (!dirty)
+                            continue;
+                        if (runY0 < 0)
+                        {
+                            runY0 = by0;
+                            runX0 = bx0;
+                            runX1 = bx1;
+                        }
+                        runY1 = by1;
+                    }
+                    if (runY0 >= 0)
+                        present(bits, runX0, runY0, runX1, runY1);
+                }
+                else
+                {
+                    present(bits, x0, y0, x1, y1);
+                }
                 _msBlit += amiga_ticks_ms() - tb;
-                _pxBlit += static_cast<unsigned long>(x1 - x0) * static_cast<unsigned long>(y1 - y0);
             }
         }
         resetDirtyBox();
@@ -258,21 +337,20 @@ public:
     // A viewport scroll moves the already-drawn pixels inside the framebuffer and only the exposed strips are
     // drawn as dirty blocks. Since this engine pushes just the dirty union to the screen, the moved pixels have to
     // join that union or the screen scrolls in pieces (tester report: "scrollt nur so Teile vom Bildschirm").
+    //
+    // A zero shift copies nothing: the viewport-shift code (ShiftRedraw in Viewport.cpp) uses it to report a region
+    // it repainted straight into the framebuffer, outside the dirty grid.
     void CopyRect(int32_t x, int32_t y, int32_t width, int32_t height, int32_t dx, int32_t dy) override
     {
-        if (dx == 0 && dy == 0)
-            return;
-        X8DrawingEngine::CopyRect(x, y, width, height, dx, dy);
+        if (dx != 0 || dy != 0)
+            X8DrawingEngine::CopyRect(x, y, width, height, dx, dy);
         int32_t x0 = std::max<int32_t>(0, std::min(x, x - dx));
         int32_t y0 = std::max<int32_t>(0, std::min(y, y - dy));
         int32_t x1 = std::min<int32_t>(static_cast<int32_t>(_width), std::max(x, x - dx) + width);
         int32_t y1 = std::min<int32_t>(static_cast<int32_t>(_height), std::max(y, y - dy) + height);
         if (x1 <= x0 || y1 <= y0)
             return;
-        _dbX0 = std::min(_dbX0, x0);
-        _dbY0 = std::min(_dbY0, y0);
-        _dbX1 = std::max(_dbX1, x1);
-        _dbY1 = std::max(_dbY1, y1);
+        markDirty(x0, y0, x1, y1);
     }
 
 protected:
@@ -290,11 +368,8 @@ protected:
         int32_t y1 = std::min<int32_t>(std::min<int32_t>(bottom, static_cast<int32_t>(_height)), window->height);
         if (x1 <= x0 || y1 <= y0)
             return;
-        // Accumulate into the frame's dirty bounding box; the union is blitted once in EndDraw.
-        _dbX0 = std::min(_dbX0, x0);
-        _dbY0 = std::min(_dbY0, y0);
-        _dbX1 = std::max(_dbX1, x1);
-        _dbY1 = std::max(_dbY1, y1);
+        // Accumulate into the frame's dirty bounding box and bands; presented once in EndDraw.
+        markDirty(x0, y0, x1, y1);
     }
 };
 

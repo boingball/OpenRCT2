@@ -24,6 +24,9 @@ namespace OpenRCT2::Drawing
         uint32_t _lowestColumn{ std::numeric_limits<uint32_t>::max() };
         uint32_t _highestColumn{};
 
+        std::vector<uint8_t> _coalesceSeen;
+        std::vector<uint32_t> _coalesceStack;
+
     public:
         uint32_t getRowCount() const noexcept;
 
@@ -36,6 +39,72 @@ namespace OpenRCT2::Drawing
         void reset(int32_t width, int32_t height, uint32_t blockWidth, uint32_t blockHeight) noexcept;
 
         void invalidate(int32_t left, int32_t top, int32_t right, int32_t bottom) noexcept;
+
+        /**
+         * Grows each 8-connected patch of dirty cells to its bounding box when the patch fills at least
+         * minFillPercent of it. Moving sprites leave staircase-shaped patches that traverseDirtyCells splits into
+         * several rectangles; every rectangle costs a whole viewport paint (tile walk included), so painting a few
+         * clean cells inside one box is cheaper. Marking more cells dirty is always correct.
+         */
+        void coalesce(uint32_t minFillPercent)
+        {
+            if (_lowestRow > _highestRow || _lowestColumn > _highestColumn || _columnCount == 0 || _rowCount == 0)
+                return;
+            const uint32_t r0 = _lowestRow, r1 = std::min(_highestRow, _rowCount - 1);
+            const uint32_t c0 = _lowestColumn, c1 = std::min(_highestColumn, _columnCount - 1);
+            _coalesceSeen.assign(_blocks.size(), 0);
+            for (uint32_t row = r0; row <= r1; ++row)
+            {
+                for (uint32_t col = c0; col <= c1; ++col)
+                {
+                    const uint32_t start = row * _columnCount + col;
+                    if (_blocks[start] == 0 || _coalesceSeen[start] != 0)
+                        continue;
+                    uint32_t minR = row, maxR = row, minC = col, maxC = col, count = 0;
+                    _coalesceStack.clear();
+                    _coalesceStack.push_back(start);
+                    _coalesceSeen[start] = 1;
+                    while (!_coalesceStack.empty())
+                    {
+                        const uint32_t index = _coalesceStack.back();
+                        _coalesceStack.pop_back();
+                        ++count;
+                        const uint32_t r = index / _columnCount, c = index % _columnCount;
+                        minR = std::min(minR, r);
+                        maxR = std::max(maxR, r);
+                        minC = std::min(minC, c);
+                        maxC = std::max(maxC, c);
+                        for (int32_t dr = -1; dr <= 1; ++dr)
+                        {
+                            for (int32_t dc = -1; dc <= 1; ++dc)
+                            {
+                                const int32_t nr = static_cast<int32_t>(r) + dr, nc = static_cast<int32_t>(c) + dc;
+                                if (nr < static_cast<int32_t>(r0) || nr > static_cast<int32_t>(r1)
+                                    || nc < static_cast<int32_t>(c0) || nc > static_cast<int32_t>(c1))
+                                    continue;
+                                const uint32_t n = static_cast<uint32_t>(nr) * _columnCount + static_cast<uint32_t>(nc);
+                                if (_blocks[n] != 0 && _coalesceSeen[n] == 0)
+                                {
+                                    _coalesceSeen[n] = 1;
+                                    _coalesceStack.push_back(n);
+                                }
+                            }
+                        }
+                    }
+                    const uint32_t area = (maxR - minR + 1) * (maxC - minC + 1);
+                    if (count == area || count * 100 < area * minFillPercent)
+                        continue;
+                    for (uint32_t r = minR; r <= maxR; ++r)
+                    {
+                        for (uint32_t c = minC; c <= maxC; ++c)
+                        {
+                            _blocks[r * _columnCount + c] = 1;
+                            _coalesceSeen[r * _columnCount + c] = 1;
+                        }
+                    }
+                }
+            }
+        }
 
         template<typename F>
         void traverseDirtyCells(F&& func)

@@ -60,9 +60,9 @@ static Object* s_pointerObj = NULL;
 static struct BitMap* s_pointerBM = NULL;
 static int s_pointerShown = 1;
 static struct BitMap* s_agaBitmap = NULL;
-static UBYTE* s_agaPlanes = NULL;
+/* Chunky copy of what the Chip planes show; one byte per pixel, s_agaShadowPitch bytes per row. */
 static UBYTE* s_agaShadow = NULL;
-static int s_agaPitch = 0, s_agaPlaneSize = 0;
+static int s_agaPitch = 0, s_agaPlaneSize = 0, s_agaShadowPitch = 0;
 
 static int use_aga(void)
 {
@@ -71,15 +71,27 @@ static int use_aga(void)
         && (strcmp(value, "AGA") == 0 || strcmp(value, "aga") == 0);
 }
 
-static ULONG aga_mode(void)
+/* AGA screen height: 512 lines (PAL hires interlaced) or 256 (PAL hires without interlace: half the pixels
+ * to draw and no flicker, but every pixel is twice as tall). OPENRCT2_AGA_LINES=256 or 512 fixes it for the
+ * session; otherwise a requested height of 256 or less selects 256, so Options > Display can switch. */
+static int aga_lines_for(int height)
 {
-    const ULONG mode = PAL_MONITOR_ID | HIRESLACE_KEY;
+    char value[8] = { 0 };
+    if (GetVar((STRPTR)"OPENRCT2_AGA_LINES", value, sizeof(value), 0) > 0)
+        return strcmp(value, "256") == 0 ? 256 : 512;
+    return height > 0 && height <= 256 ? 256 : 512;
+}
+
+static ULONG aga_mode(int lines)
+{
+    const ULONG mode = PAL_MONITOR_ID | (lines == 256 ? HIRES_KEY : HIRESLACE_KEY);
     struct DimensionInfo dimensions;
     if (ModeNotAvailable(mode) != 0
         || !GetDisplayInfoData(NULL, (UBYTE*)&dimensions, sizeof(dimensions), DTAG_DIMS, mode)
         || dimensions.MaxDepth < 8)
     {
-        amiga_trace("ui: AGA PAL 640x512x8 unavailable (AGA chipset and PAL monitor required)");
+        amiga_trace(lines == 256 ? "ui: AGA PAL 640x256x8 unavailable (AGA chipset and PAL monitor required)"
+                                 : "ui: AGA PAL 640x512x8 unavailable (AGA chipset and PAL monitor required)");
         return INVALID_ID;
     }
     return mode;
@@ -88,11 +100,10 @@ static ULONG aga_mode(void)
 static void free_aga(void)
 {
     if (s_agaBitmap) { WaitBlit(); FreeBitMap(s_agaBitmap); }
-    if (s_agaPlanes) FreeVec(s_agaPlanes);
     if (s_agaShadow) FreeVec(s_agaShadow);
     s_agaBitmap = NULL;
-    s_agaPlanes = s_agaShadow = NULL;
-    s_agaPitch = s_agaPlaneSize = 0;
+    s_agaShadow = NULL;
+    s_agaPitch = s_agaPlaneSize = s_agaShadowPitch = 0;
 }
 
 static void free_pointer_shape(Object* obj, struct BitMap* bm)
@@ -121,7 +132,7 @@ static ULONG find_mode(int width, int height)
     if (!open_libs())
         return INVALID_ID;
     if (use_aga())
-        return aga_mode();
+        return aga_mode(aga_lines_for(height));
     while ((id = NextDisplayInfo(id)) != (ULONG)INVALID_ID)
     {
         long w, h, area;
@@ -154,9 +165,11 @@ int amiga_ui_list_modes(int* widths, int* heights, int max)
         return 0;
     if (use_aga())
     {
-        if (aga_mode() == (ULONG)INVALID_ID) return 0;
-        widths[0] = 640; heights[0] = 512;
-        return 1;
+        /* Both PAL hires heights; 640x256 sits below the game's usual 640x480 minimum and some tall
+         * windows do not fit, so it is offered for playing, not as the default. */
+        if (aga_mode(512) != (ULONG)INVALID_ID && n < max) { widths[n] = 640; heights[n] = 512; n++; }
+        if (aga_mode(256) != (ULONG)INVALID_ID && n < max) { widths[n] = 640; heights[n] = 256; n++; }
+        return n;
     }
     while ((id = NextDisplayInfo(id)) != (ULONG)INVALID_ID)
     {
@@ -189,7 +202,7 @@ int amiga_ui_mode_available(int width, int height)
     if (id == (ULONG)INVALID_ID)
         return 0;
     if (use_aga())
-        return width == 640 && height == 512;
+        return width == 640 && height == aga_lines_for(height);
     return GetCyberIDAttr(CYBRIDATTR_WIDTH, id) == (ULONG)width && GetCyberIDAttr(CYBRIDATTR_HEIGHT, id) == (ULONG)height;
 }
 
@@ -219,7 +232,8 @@ int amiga_ui_open(int width, int height, const char* title, int* outWidth, int* 
     if (use_aga())
     {
         int plane;
-        width = 640; height = 512;
+        width = 640;
+        height = aga_lines_for(height);
         s_agaBitmap = AllocBitMap(width, height, 8, BMF_DISPLAYABLE | BMF_CLEAR, NULL);
         if (!s_agaBitmap) { screen_error("Chip bitmap allocation", OSERR_NOCHIPMEM); return 0; }
         s_agaPitch = s_agaBitmap->BytesPerRow;
@@ -239,15 +253,16 @@ int amiga_ui_open(int width, int height, const char* title, int* outWidth, int* 
                 return 0;
             }
         }
-        s_agaPlanes = AllocVec(8 * s_agaPlaneSize, MEMF_FAST | MEMF_CLEAR);
-        s_agaShadow = AllocVec(8 * s_agaPlaneSize, MEMF_FAST | MEMF_CLEAR);
-        if (!s_agaPlanes || !s_agaShadow)
+        s_agaShadowPitch = s_agaPitch * 8;
+        s_agaShadow = AllocVec((ULONG)s_agaShadowPitch * height, MEMF_FAST | MEMF_CLEAR);
+        if (!s_agaShadow)
         {
             screen_error("Fast bitmap allocation", OSERR_NOMEM);
             free_aga();
             return 0;
         }
-        amiga_trace("ui: AGA PAL 640x512x8, Fast-RAM c2p8 and changed-word Chip copy");
+        amiga_trace(height == 256 ? "ui: AGA PAL 640x256x8 (no interlace), single-pass c2p8 of changed 32-pixel groups"
+                                  : "ui: AGA PAL 640x512x8, single-pass c2p8 of changed 32-pixel groups");
     }
     else
     {
@@ -293,12 +308,12 @@ int amiga_ui_open(int width, int height, const char* title, int* outWidth, int* 
     if (s_agaBitmap)
     {
         int plane;
-        /* Intuition may have filled the backdrop. Start both Fast copies
-         * from the real bitmap so partial-word edges preserve its pixels. */
+        /* Intuition may have filled the backdrop. The chunky shadow must equal
+         * the planes, so clear the planes to match the cleared shadow; the first
+         * game frame repaints the whole screen anyway. */
         WaitBlit();
         for (plane = 0; plane < 8; ++plane)
-            memcpy(s_agaPlanes + plane * s_agaPlaneSize, s_agaBitmap->Planes[plane], (size_t)s_agaPlaneSize);
-        memcpy(s_agaShadow, s_agaPlanes, (size_t)(8 * s_agaPlaneSize));
+            memset(s_agaBitmap->Planes[plane], 0, (size_t)s_agaPlaneSize);
     }
     *outWidth = s_width;
     *outHeight = s_height;
@@ -407,9 +422,8 @@ void amiga_ui_blit(const unsigned char* src, int srcPitch, int x, int y, int w, 
         uint8_t* chip[8];
         int plane;
         for (plane = 0; plane < 8; ++plane) chip[plane] = s_agaBitmap->Planes[plane];
-        amiga_c2p8_rect(src, srcPitch, s_agaPlanes, s_agaPitch, s_agaPlaneSize, x, y, w, h);
         WaitBlit();
-        amiga_c2p8_present(s_agaPlanes, s_agaShadow, chip, s_agaPitch, s_agaPlaneSize, x, y, w, h);
+        amiga_c2p8_update(src, srcPitch, s_agaShadow, s_agaShadowPitch, chip, s_agaPitch, x, y, w, h);
         return;
     }
     if (s_blitMethod < 0)

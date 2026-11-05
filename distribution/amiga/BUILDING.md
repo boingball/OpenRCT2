@@ -49,6 +49,24 @@ Notable toolchain facts the tree works around:
 
 ## 4. Packaging
 
+The drawer's `data/` folder (g2/fonts/palettes/tracks `.dat`, languages,
+objects, title sequences) has to come from a native build of the same tree,
+because a cross build cannot run the sprite tool that generates the `.dat`
+files. On Linux/WSL:
+
+```sh
+cmake -S . -B build-host -G Ninja -DCMAKE_BUILD_TYPE=Release -DDISABLE_GUI=ON \
+  -DDISABLE_NETWORK=ON -DDISABLE_HTTP=ON -DDISABLE_TTF=ON -DENABLE_SCRIPTING=OFF \
+  -DDISABLE_DISCORD_RPC=ON -DDISABLE_VERSION_CHECKER=ON -DWITH_TESTS=OFF -DCMAKE_INSTALL_PREFIX=/usr
+cmake --build build-host --target graphics
+DESTDIR=$HOME/openrct2-host cmake --install build-host   # downloads objects and title sequences
+sh distribution/amiga/stage-drawer.sh build-060 $HOME/openrct2-host/usr/share/openrct2 $HOME/amiga-drawer
+```
+
+Copy `amiga-drawer/OpenRCT2` and `amiga-drawer/OpenRCT2.info` to the Amiga.
+`OpenRCT2-A1200-Offline` starts the normal build with AGA, Paula and the
+static title menu.
+
 `distribution/amiga/build-archive.sh` stages the tester layout
 (`OpenRCT2/{OpenRCT2 launcher, bin/openrct2, data/, user/}`) and packs an
 LhA archive. The launcher expects the original RCT2 data under the `RCT2:`

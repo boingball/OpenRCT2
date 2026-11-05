@@ -46,6 +46,8 @@ if (AMIGA)
     add_executable(openrct2-paula-pcm-test tests/paula_pcm.c)
     add_executable(openrct2-c2p8-test tests/c2p8.c
         "${ROOT_DIR}/src/openrct2-ui/platform/amiga/amiga_c2p8.c")
+    add_executable(openrct2-c2p8-bench tests/c2p8_bench.c
+        "${ROOT_DIR}/src/openrct2-ui/platform/amiga/amiga_c2p8.c")
     add_executable(openrct2-rle-zoom-test tests/rle_zoom.cpp
         "${ROOT_DIR}/src/openrct2/drawing/Drawing.Sprite.RLE.cpp")
     target_include_directories(openrct2-rle-zoom-test PRIVATE "${ROOT_DIR}/src")

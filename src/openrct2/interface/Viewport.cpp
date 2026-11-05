@@ -299,6 +299,17 @@ namespace OpenRCT2
     /*
      *  rct2: 0x006E7FF3
      */
+    // Repaint part of the screen while a viewport is shifted. These repaints go straight to the framebuffer,
+    // not through the dirty grid; the Amiga engine presents only the regions it is told about, so tell it.
+    static void ShiftRedraw(RenderTarget& rt, int32_t left, int32_t top, int32_t right, int32_t bottom)
+    {
+        WindowDrawAll(rt, left, top, right, bottom);
+#ifdef __amigaos__
+        if (right > left && bottom > top)
+            DrawingEngineCopyRect(left, top, right - left, bottom - top, 0, 0);
+#endif
+    }
+
     static void ViewportRedrawAfterShift(
         RenderTarget& rt, WindowBase* window, const WindowBase* originalWindow, const ScreenCoordsXY shift,
         const ScreenRect& drawRect)
@@ -377,14 +388,14 @@ namespace OpenRCT2
                 {
                     // draw left
                     auto _right = left + shift.x;
-                    WindowDrawAll(rt, left, top, _right, bottom);
+                    ShiftRedraw(rt, left, top, _right, bottom);
                     left += shift.x;
                 }
                 else if (shift.x < 0)
                 {
                     // draw right
                     auto _left = right + shift.x;
-                    WindowDrawAll(rt, _left, top, right, bottom);
+                    ShiftRedraw(rt, _left, top, right, bottom);
                     right += shift.x;
                 }
 
@@ -392,19 +403,19 @@ namespace OpenRCT2
                 {
                     // draw top
                     bottom = top + shift.y;
-                    WindowDrawAll(rt, left, top, right, bottom);
+                    ShiftRedraw(rt, left, top, right, bottom);
                 }
                 else if (shift.y < 0)
                 {
                     // draw bottom
                     top = bottom + shift.y;
-                    WindowDrawAll(rt, left, top, right, bottom);
+                    ShiftRedraw(rt, left, top, right, bottom);
                 }
             }
             else
             {
                 // redraw whole draw rectangle
-                WindowDrawAll(rt, left, top, right, bottom);
+                ShiftRedraw(rt, left, top, right, bottom);
             }
         }
     }
@@ -449,7 +460,7 @@ namespace OpenRCT2
                                 .c_str());
             }
 #endif
-            WindowDrawAll(rt, left, top, right, bottom);
+            ShiftRedraw(rt, left, top, right, bottom);
         }
 
         ViewportRedrawAfterShift(rt, window, window, shift, drawRect);
@@ -947,7 +958,22 @@ namespace OpenRCT2
             useParallelDrawing = true;
         }
 
+#ifdef __amigaos__
+        // OPENRCT2_PAINT_COLUMN=64 or 128 paints in columns of that many world pixels instead of 32. Each column is
+        // still generated as 32 px tile walks (Paint.cpp), but a tile shared by neighbouring walks is set up once per
+        // column instead of once per walk. Columns stay aligned in world space, so a region sorts the same in every
+        // repaint. The default (32) is upstream's.
+        static const int32_t columnFactor = [] {
+            char v[8] = {};
+            if (!amiga_getenv_str("OPENRCT2_PAINT_COLUMN", v, static_cast<int>(sizeof(v))))
+                return 1;
+            const int32_t w = std::atoi(v);
+            return w >= 128 ? 4 : (w >= 64 ? 2 : 1);
+        }();
+        const int32_t columnWidth = worldRT.zoom_level.ApplyInversedTo(kCoordsXYStep * columnFactor);
+#else
         const int32_t columnWidth = worldRT.zoom_level.ApplyInversedTo(kCoordsXYStep);
+#endif
         const int32_t rightBorder = worldRT.x + worldRT.width;
         const int32_t alignedX = floor2(worldRT.x, columnWidth);
 

@@ -1190,12 +1190,21 @@ struct RCT12ResearchItem
     union
     {
         uint32_t RawValue;
+        // The importer converts RawValue to host order, so on a big-endian host the
+        // byte fields that alias it sit in the reverse order of the file.
         struct
         {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+            uint8_t Flags;
+            uint8_t Type; // 0: scenery entry, 1: ride entry
+            uint8_t BaseRideType;
+            RCT12ObjectEntryIndex EntryIndex;
+#else
             RCT12ObjectEntryIndex EntryIndex;
             uint8_t BaseRideType;
             uint8_t Type; // 0: scenery entry, 1: ride entry
             uint8_t Flags;
+#endif
         };
     };
     uint8_t Category;
