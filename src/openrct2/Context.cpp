@@ -1369,9 +1369,9 @@ namespace OpenRCT2
          *
          * The opposite case is a small park on a slow machine: a tick costs 20 ms but a frame's drawing 200 ms (a
          * 50 MHz 68060 at 640x512). One tick per drawn frame then runs the park at a tenth of real time. So the
-         * budget is also allowed to grow to half the drawing time: ticks never take more than a third of a frame,
-         * which costs at most a quarter of the frame rate and buys up to four times the game speed.
-         * OPENRCT2_TICK_BALANCE=0 keeps the budget at one tick's worth of real time.
+         * budget may grow to half the drawing time (up to four ticks a frame). Opt-in with OPENRCT2_TICK_BALANCE=1:
+         * measured on an A1200 (50 MHz 68060) it doubled the park clock (12% to 25% of real time) but cut the frame
+         * rate from 4.2 to 2.6 fps, because more movement per frame means more and larger repaints.
          *
          * OPENRCT2_NO_TICKCAP=1 restores the plain upstream behaviour for comparison.
          */
@@ -1382,7 +1382,7 @@ namespace OpenRCT2
             static const bool disabled = amiga_env_flag("OPENRCT2_NO_TICKCAP") != 0;
             static const bool noBalance = [] {
                 char v[4] = {};
-                return amiga_getenv_str("OPENRCT2_TICK_BALANCE", v, static_cast<int>(sizeof(v))) && v[0] == '0';
+                return !(amiga_getenv_str("OPENRCT2_TICK_BALANCE", v, static_cast<int>(sizeof(v))) && v[0] == '1');
             }();
             if (disabled || _amigaTickMsAvg <= 1)
                 return kGameMaxUpdates;
