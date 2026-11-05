@@ -9,6 +9,8 @@
 
 #include "X8DrawingEngine.h"
 
+#include <cstdlib>
+
 #include "../platform/AmigaTrace.h"
 
 #include "../config/Config.h"
@@ -366,6 +368,19 @@ void X8DrawingEngine::ConfigureDirtyGrid()
 
 void X8DrawingEngine::DrawAllDirtyBlocks()
 {
+#ifdef __amigaos__
+    // OPENRCT2_DIRTY_MERGE=<percent>: paint each connected dirty patch as one box when it fills at least that
+    // much of the box (see InvalidationGrid::coalesce). Fewer, larger viewport paints; off by default.
+    static const uint32_t mergePercent = [] {
+        char v[8] = {};
+        if (!amiga_getenv_str("OPENRCT2_DIRTY_MERGE", v, static_cast<int>(sizeof(v))))
+            return 0u;
+        const int p = std::atoi(v);
+        return p > 0 && p <= 100 ? static_cast<uint32_t>(p) : 0u;
+    }();
+    if (mergePercent != 0)
+        _invalidationGrid.coalesce(mergePercent);
+#endif
     _invalidationGrid.traverseDirtyCells([this](int32_t left, int32_t top, int32_t right, int32_t bottom) {
         // Draw region
         DrawDirtyBlocks(left, top, right, bottom);
