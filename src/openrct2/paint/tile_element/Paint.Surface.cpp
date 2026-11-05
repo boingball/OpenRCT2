@@ -157,6 +157,31 @@ struct TileDescriptor
     SlopeRelativeCornerHeights corner_heights;
 };
 
+#ifdef __amigaos__
+// Per-frame cache of the neighbour descriptors PaintSurface looks up for every ground tile. The same positions are
+// asked for by each of their four neighbours and again by every overlapping repaint in a frame, and the map cannot
+// change while the windows are painted. Painter::Paint sets the serial (nonzero) around that, so mouse picking and
+// any other paint outside a frame never sees stale entries. OPENRCT2_NO_NEIGHBOUR_CACHE switches it off.
+uint32_t gPaintNeighbourCacheSerial = 0;
+namespace
+{
+    struct NeighbourCacheEntry
+    {
+        uint32_t serial;
+        int32_t x;
+        int32_t y;
+        uint8_t rotation;
+        TileDescriptor descriptor;
+    };
+    constexpr uint32_t kNeighbourCacheSize = 1024; // power of two, direct mapped
+    #ifdef OPENRCT2_AMIGA_THREADS
+    thread_local NeighbourCacheEntry sNeighbourCache[kNeighbourCacheSize];
+    #else
+    NeighbourCacheEntry sNeighbourCache[kNeighbourCacheSize];
+    #endif
+} // namespace
+#endif
+
 struct TileSurfaceBoundaryData
 {
     int32_t bit_1;
@@ -1000,12 +1025,51 @@ void PaintSurface(PaintSession& session, uint8_t direction, uint16_t height, con
 #endif
     {
     PAINT_PROF_SCOPE_PHASE(10, 1);
+#ifdef __amigaos__
+    static const bool neighbourCacheOff = amiga_env_flag("OPENRCT2_NO_NEIGHBOUR_CACHE") != 0;
+    const uint32_t cacheSerial = neighbourCacheOff ? 0u : gPaintNeighbourCacheSerial;
+#endif
     for (std::size_t i = 0; i < std::size(kNeighbouringTileCoordOffsets); i++)
     {
         const CoordsXY& offset = kNeighbouringTileCoordOffsets[i][rotation];
         const CoordsXY position = base + offset;
 
         TileDescriptor& descriptor = tileDescriptors[i];
+
+#ifdef __amigaos__
+        NeighbourCacheEntry* cacheEntry = nullptr;
+        if (cacheSerial != 0)
+        {
+            const uint32_t tx = static_cast<uint32_t>(position.x >> 5), ty = static_cast<uint32_t>(position.y >> 5);
+            cacheEntry = &sNeighbourCache[(tx * 73u + ty * 37u + rotation * 11u) & (kNeighbourCacheSize - 1)];
+            if (cacheEntry->serial == cacheSerial && cacheEntry->x == position.x && cacheEntry->y == position.y
+                && cacheEntry->rotation == rotation)
+            {
+                descriptor = cacheEntry->descriptor;
+                continue;
+            }
+        }
+        // Stores this neighbour's descriptor when the block below finishes, whichever way it leaves.
+        struct CacheStore
+        {
+            NeighbourCacheEntry* entry;
+            const TileDescriptor& descriptor;
+            uint32_t serial;
+            const CoordsXY& position;
+            uint8_t rotation;
+            ~CacheStore()
+            {
+                if (entry != nullptr)
+                {
+                    entry->serial = serial;
+                    entry->x = position.x;
+                    entry->y = position.y;
+                    entry->rotation = rotation;
+                    entry->descriptor = descriptor;
+                }
+            }
+        } cacheStore{ cacheEntry, descriptor, cacheSerial, position, rotation };
+#endif
 
         descriptor.tile_element = nullptr;
         if (!MapIsLocationValid(position))

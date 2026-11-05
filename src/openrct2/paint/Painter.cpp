@@ -32,6 +32,10 @@
 #include "../world/MapSelection.h"
 #include "../world/TileInspector.h"
 
+#ifdef __amigaos__
+extern uint32_t gPaintNeighbourCacheSerial;
+#endif
+
 using namespace OpenRCT2;
 using namespace OpenRCT2::Drawing;
 using namespace OpenRCT2::Paint;
@@ -57,7 +61,17 @@ void Painter::Paint(IDrawingEngine& de)
         MapSelection::invalidate();
         VirtualFloorInvalidate(false);
 
+#ifdef __amigaos__
+        // Enables the per-frame ground neighbour cache in Paint.Surface.cpp for exactly this paint.
+        static uint32_t paintSerial = 0;
+        if (++paintSerial == 0)
+            paintSerial = 1;
+        gPaintNeighbourCacheSerial = paintSerial;
         de.PaintWindows();
+        gPaintNeighbourCacheSerial = 0;
+#else
+        de.PaintWindows();
+#endif
 
         UpdatePaletteEffects();
         _uiContext.Draw(*rt);
