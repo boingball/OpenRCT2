@@ -6,6 +6,9 @@
 Failat 21
 SetEnv OPENRCT2_AUDIO PAULA
 SetEnv OPENRCT2_SKIP_TITLE 1
+; 64 px paint columns: each map tile set up once per column (about 5% less drawing time).
+SetEnv OPENRCT2_PAINT_COLUMN 64
 Execute OpenRCT2-AGA "<RCT2DIR>"
+UnsetEnv OPENRCT2_PAINT_COLUMN
 UnsetEnv OPENRCT2_SKIP_TITLE
 UnsetEnv OPENRCT2_AUDIO
