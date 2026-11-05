@@ -958,7 +958,22 @@ namespace OpenRCT2
             useParallelDrawing = true;
         }
 
+#ifdef __amigaos__
+        // OPENRCT2_PAINT_COLUMN=64 or 128 paints in columns of that many world pixels instead of 32. Each column is
+        // still generated as 32 px tile walks (Paint.cpp), but a tile shared by neighbouring walks is set up once per
+        // column instead of once per walk. Columns stay aligned in world space, so a region sorts the same in every
+        // repaint. The default (32) is upstream's.
+        static const int32_t columnFactor = [] {
+            char v[8] = {};
+            if (!amiga_getenv_str("OPENRCT2_PAINT_COLUMN", v, static_cast<int>(sizeof(v))))
+                return 1;
+            const int32_t w = std::atoi(v);
+            return w >= 128 ? 4 : (w >= 64 ? 2 : 1);
+        }();
+        const int32_t columnWidth = worldRT.zoom_level.ApplyInversedTo(kCoordsXYStep * columnFactor);
+#else
         const int32_t columnWidth = worldRT.zoom_level.ApplyInversedTo(kCoordsXYStep);
+#endif
         const int32_t rightBorder = worldRT.x + worldRT.width;
         const int32_t alignedX = floor2(worldRT.x, columnWidth);
 

@@ -309,11 +309,75 @@ static PaintStruct* CreateNormalPaintStructHeight(
     return ps;
 }
 
+#ifdef __amigaos__
+// Wide paint columns (OPENRCT2_PAINT_COLUMN, see Viewport.cpp) are generated as several 32 px tile walks into one
+// session. Neighbouring walks share most of their tiles (a tile is 64 px wide on screen and every walk also visits
+// its neighbours), so each tile and each tile's entities are set up once per session: this table remembers which.
+namespace
+{
+    struct PaintWalkSeen
+    {
+        static constexpr uint32_t kSize = 4096; // power of two; a 128 px column walks well under 2000 positions
+        uint32_t key[kSize];
+        uint32_t gen[kSize];
+        uint32_t current = 0;
+        bool active = false;
+
+        void begin()
+        {
+            active = true;
+            if (++current == 0)
+            {
+                std::fill(std::begin(gen), std::end(gen), 0u);
+                current = 1;
+            }
+        }
+
+        // True the first time (pos, kind) is asked for during this walk; always true when not active.
+        bool first(const CoordsXY& pos, uint32_t kind)
+        {
+            if (!active)
+                return true;
+            const uint32_t tx = static_cast<uint32_t>((pos.x >> 5) + 2048) & 0xFFF;
+            const uint32_t ty = static_cast<uint32_t>((pos.y >> 5) + 2048) & 0xFFF;
+            const uint32_t k = (tx << 13) | (ty << 1) | kind;
+            uint32_t i = (k * 2654435761u) >> 20;
+            for (uint32_t probe = 0; probe < kSize; probe++, i = (i + 1) & (kSize - 1))
+            {
+                if (gen[i] != current)
+                {
+                    gen[i] = current;
+                    key[i] = k;
+                    return true;
+                }
+                if (key[i] == k)
+                    return false;
+            }
+            return true; // table full: paint again rather than drop it
+        }
+    };
+    #ifdef OPENRCT2_AMIGA_THREADS
+    thread_local PaintWalkSeen sPaintWalkSeen;
+    #else
+    PaintWalkSeen sPaintWalkSeen;
+    #endif
+} // namespace
+static bool PaintWalkFirst(const CoordsXY& pos, uint32_t kind)
+{
+    return sPaintWalkSeen.first(pos, kind);
+}
+#else
+static constexpr bool PaintWalkFirst(const CoordsXY&, uint32_t)
+{
+    return true;
+}
+#endif
+
 template<uint8_t direction>
-void PaintSessionGenerateRotate(PaintSession& session)
+void PaintSessionGenerateRotate(PaintSession& session, int32_t worldX)
 {
     // Optimised modified version of ViewportPosToMapPos
-    ScreenCoordsXY screenCoord = { floor2(session.rt.WorldX(), 32), floor2((session.rt.WorldY() - 16), 32) };
+    ScreenCoordsXY screenCoord = { floor2(worldX, 32), floor2((session.rt.WorldY() - 16), 32) };
     CoordsXY mapTile = { screenCoord.y - screenCoord.x / 2, screenCoord.y + screenCoord.x / 2 };
     mapTile = mapTile.rotate(direction);
 
@@ -361,21 +425,46 @@ void PaintSessionGenerateRotate(PaintSession& session)
 
     for (; numVerticalTiles > 0; --numVerticalTiles)
     {
-        TileElementPaintSetup(session, mapTile);
-        EntityPaintSetup(session, mapTile);
+        if (PaintWalkFirst(mapTile, 0))
+            TileElementPaintSetup(session, mapTile);
+        if (PaintWalkFirst(mapTile, 1))
+            EntityPaintSetup(session, mapTile);
 
         const auto loc1 = mapTile + adjacentTiles[0];
-        EntityPaintSetup(session, loc1);
+        if (PaintWalkFirst(loc1, 1))
+            EntityPaintSetup(session, loc1);
 
         const auto loc2 = mapTile + adjacentTiles[1];
-        TileElementPaintSetup(session, loc2);
-        EntityPaintSetup(session, loc2);
+        if (PaintWalkFirst(loc2, 0))
+            TileElementPaintSetup(session, loc2);
+        if (PaintWalkFirst(loc2, 1))
+            EntityPaintSetup(session, loc2);
 
         const auto loc3 = mapTile + adjacentTiles[2];
-        EntityPaintSetup(session, loc3);
+        if (PaintWalkFirst(loc3, 1))
+            EntityPaintSetup(session, loc3);
 
         mapTile += nextVerticalTile;
     }
+}
+
+template<uint8_t direction>
+static void PaintSessionGenerateColumns(PaintSession& session)
+{
+#ifdef __amigaos__
+    // A column wider than one 32 px tile walk: walk each 32 px strip, setting every tile up only once.
+    const int32_t left = floor2(session.rt.WorldX(), 32);
+    const int32_t right = session.rt.WorldX() + session.rt.WorldWidth();
+    if (right - left > 32)
+    {
+        sPaintWalkSeen.begin();
+        for (int32_t x = left; x < right; x += 32)
+            PaintSessionGenerateRotate<direction>(session, x);
+        sPaintWalkSeen.active = false;
+        return;
+    }
+#endif
+    PaintSessionGenerateRotate<direction>(session, session.rt.WorldX());
 }
 
 /**
@@ -387,16 +476,16 @@ void PaintSessionGenerate(PaintSession& session)
     switch (DirectionFlipXAxis(session.CurrentRotation))
     {
         case 0:
-            PaintSessionGenerateRotate<0>(session);
+            PaintSessionGenerateColumns<0>(session);
             break;
         case 1:
-            PaintSessionGenerateRotate<1>(session);
+            PaintSessionGenerateColumns<1>(session);
             break;
         case 2:
-            PaintSessionGenerateRotate<2>(session);
+            PaintSessionGenerateColumns<2>(session);
             break;
         case 3:
-            PaintSessionGenerateRotate<3>(session);
+            PaintSessionGenerateColumns<3>(session);
             break;
     }
 }
